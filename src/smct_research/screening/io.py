@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,9 @@ def load_universe(path: Path) -> list[UniverseEntry]:
             payload = list(csv.DictReader(handle))
     else:
         raise ValueError("Universe input must be a .json or .csv file")
-    return [UniverseEntry.model_validate(_normalize_company(row)) for row in payload]
+    companies = [UniverseEntry.model_validate(_normalize_company(row)) for row in payload]
+    _reject_duplicates((company.ticker for company in companies), "universe")
+    return companies
 
 
 def load_feature_snapshots(
@@ -36,8 +39,18 @@ def load_feature_snapshots(
     snapshots: dict[str, FeatureSnapshot] = {}
     for path in sorted(directory.glob("*.json")):
         snapshot = FeatureSnapshot.model_validate_json(path.read_text())
+        if snapshot.ticker in snapshots:
+            raise ValueError(f"Duplicate feature snapshot ticker: {snapshot.ticker}")
         snapshots[snapshot.ticker] = snapshot
     return snapshots
+
+
+def _reject_duplicates(tickers: Iterable[str], label: str) -> None:
+    seen: set[str] = set()
+    for ticker in tickers:
+        if ticker in seen:
+            raise ValueError(f"Duplicate {label} ticker: {ticker}")
+        seen.add(ticker)
 
 
 def write_json(path: Path, results: list[RankedResult]) -> None:

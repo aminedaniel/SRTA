@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from smct_research.core.models import FeatureSnapshot
+from smct_research.core.models import FeatureSnapshot, SignalDirection, SignalResult, normalize_utc
 from smct_research.core.signal import SignalRegistry
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.models import RankedResult, UniverseEntry
@@ -24,7 +24,7 @@ class BatchEvaluationService:
         as_of: datetime | None = None,
         include_ineligible: bool = False,
     ) -> list[RankedResult]:
-        evaluated_at = as_of or datetime.now(UTC)
+        evaluated_at = normalize_utc(as_of) if as_of else datetime.now(UTC)
         output: list[RankedResult] = []
         signals = list(self.registry.all())
         for company in companies:
@@ -33,7 +33,7 @@ class BatchEvaluationService:
             if not eligible and not include_ineligible:
                 continue
             snapshot = snapshots.get(company.ticker)
-            results = []
+            results: list[SignalResult] = []
             unavailable = [signal.id for signal in signals]
             stale: list[str] = []
             point_in_time: list[str] = []
@@ -47,7 +47,18 @@ class BatchEvaluationService:
                         point_in_time.append(f"source_after_evaluation:{source}")
                     elif (evaluated_at - source_time).days > 90:
                         stale.append(f"stale_evidence:{source}")
-                results = self.registry.evaluate_all(snapshot)
+                future_snapshot = snapshot.as_of > evaluated_at
+                future_sources = [
+                    source
+                    for source, source_time in snapshot.source_as_of.items()
+                    if source_time > evaluated_at
+                ]
+                if future_snapshot or future_sources:
+                    results = []
+                else:
+                    results = self.registry.evaluate_all(snapshot)
+                    for result in results:
+                        result.evaluated_at = evaluated_at
                 unavailable = [s.id for s in signals if s.id not in {r.signal_id for r in results}]
             completeness = (100 * len(results) / len(signals)) if signals else 100.0
             score = self.scorer.score(results) if results else None
@@ -60,7 +71,7 @@ class BatchEvaluationService:
                     positive_signals=score.positive_signals if score else [],
                     negative_signals=score.negative_signals if score else [],
                     unavailable_signals=unavailable,
-                    top_supporting_explanations=(score.explanations[:3] if score else []),
+                    top_supporting_explanations=self._supporting_explanations(results),
                     universe_eligible=eligible,
                     exclusion_reasons=reasons,
                     evaluation_timestamp=evaluated_at,
@@ -82,8 +93,22 @@ class BatchEvaluationService:
             ),
         )
         rank = 0
-        for result in ranked:
-            if result.universe_eligible and result.composite_score is not None:
+        for ranked_result in ranked:
+            if ranked_result.universe_eligible and ranked_result.composite_score is not None:
                 rank += 1
-                result.rank = rank
+                ranked_result.rank = rank
         return ranked
+
+    def _supporting_explanations(self, results: list[SignalResult]) -> list[str]:
+        positive = [result for result in results if result.direction == SignalDirection.POSITIVE]
+        positive.sort(
+            key=lambda result: (
+                -(
+                    result.score
+                    * result.confidence
+                    * self.scorer.weights.get(result.signal_id, 1.0)
+                ),
+                result.signal_id,
+            )
+        )
+        return [f"{result.signal_id}: {result.thesis}" for result in positive[:3]]

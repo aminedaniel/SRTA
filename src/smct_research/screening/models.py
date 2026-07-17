@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from smct_research.core.models import Company, SignalResult
+from smct_research.core.models import Company, SignalResult, normalize_utc
 
 
 class UniverseEntry(Company):
@@ -25,6 +25,13 @@ class FeatureAssemblyInput(BaseModel):
     values: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict)
     source_as_of: dict[str, datetime] = Field(default_factory=dict)
+
+    def model_post_init(self, __context: object) -> None:
+        self.ticker = self.ticker.upper().strip()
+        self.as_of = normalize_utc(self.as_of)
+        self.source_as_of = {
+            source: normalize_utc(timestamp) for source, timestamp in self.source_as_of.items()
+        }
 
 
 class RankedResult(BaseModel):

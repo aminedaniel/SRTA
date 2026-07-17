@@ -33,11 +33,17 @@ class UniversePolicy(BaseModel):
         reasons: list[str] = []
         if not company.is_active:
             reasons.append("inactive_security")
-        if company.country.upper() not in self.countries:
+        if not company.country:
+            reasons.append("unknown_country")
+        elif company.country.upper() not in self.countries:
             reasons.append("not_us_listed")
         if not company.exchange or company.exchange.upper() not in self.allowed_exchanges:
-            reasons.append("unsupported_or_otc_exchange")
-        if company.security_type.lower() in self.excluded_security_types:
+            reasons.append(
+                "unknown_exchange" if not company.exchange else "unsupported_or_otc_exchange"
+            )
+        if not company.security_type:
+            reasons.append("unknown_security_type")
+        elif company.security_type.lower() in self.excluded_security_types:
             reasons.append(f"excluded_security_type:{company.security_type.lower()}")
         if company.market_cap_usd < self.minimum_market_cap_usd:
             reasons.append("market_cap_below_minimum")

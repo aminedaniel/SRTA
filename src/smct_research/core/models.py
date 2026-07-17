@@ -7,6 +7,11 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 
+def normalize_utc(value: datetime) -> datetime:
+    """Interpret naive timestamps as UTC and convert aware ones to UTC."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 class SignalDirection(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
@@ -77,12 +82,12 @@ class Company(BaseModel):
     market_cap_usd: float = Field(gt=0)
     sector: str
     industry: str | None = None
-    exchange: str | None = "NASDAQ"
+    exchange: str | None = None
     cik: str | None = None
-    country: str = "US"
+    country: str | None = None
     average_daily_dollar_volume: float | None = Field(default=None, ge=0)
     is_active: bool = True
-    security_type: str = "common_equity"
+    security_type: str | None = None
 
     @model_validator(mode="after")
     def normalize_ticker(self) -> Company:
@@ -96,6 +101,15 @@ class FeatureSnapshot(BaseModel):
     values: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict)
     source_as_of: dict[str, datetime] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def normalize_snapshot(self) -> FeatureSnapshot:
+        self.ticker = self.ticker.upper().strip()
+        self.as_of = normalize_utc(self.as_of)
+        self.source_as_of = {
+            source: normalize_utc(timestamp) for source, timestamp in self.source_as_of.items()
+        }
+        return self
 
     def require_float(self, key: str) -> float:
         value = self.values.get(key)
@@ -115,6 +129,12 @@ class SignalResult(BaseModel):
     risks: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def normalize_evaluated_at(self) -> SignalResult:
+        self.ticker = self.ticker.upper().strip()
+        self.evaluated_at = normalize_utc(self.evaluated_at)
+        return self
 
 
 class ResearchThesis(BaseModel):
