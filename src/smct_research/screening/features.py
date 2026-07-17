@@ -37,6 +37,11 @@ class FeatureSnapshotAssembler:
         from smct_research.valuation.reverse_dcf import solve_reverse_dcf, value_dcf
 
         values = dict(evidence.values)
+        sources = dict(evidence.sources)
+        source_as_of = dict(evidence.source_as_of)
+        for field, timestamp in inputs.available_at.items():
+            source_as_of[f"dcf:{field}"] = timestamp
+            sources[f"dcf:{field}"] = inputs.provenance.get(field, "unspecified")
         by_name = {scenario.name: value_dcf(inputs, scenario) for scenario in scenarios}
         for name, result in by_name.items():
             if result.valid:
@@ -59,6 +64,11 @@ class FeatureSnapshotAssembler:
                         - max(0.0, base.terminal_value_share - 0.65)
                         - 0.25 * len(reverse.diagnostics),
                     ),
+                    "dcf_annual_dilution": (
+                        base_scenario.annual_dilution
+                        if base_scenario.annual_dilution is not None
+                        else inputs.expected_annual_dilution
+                    ),
                     "dcf_input_age_days": max(
                         (inputs.valuation_date - date).days for date in inputs.available_at.values()
                     )
@@ -69,4 +79,6 @@ class FeatureSnapshotAssembler:
             conservative = by_name.get("conservative")
             if conservative and conservative.valid:
                 values["dcf_conservative_downside_percent"] = conservative.upside_downside_percent
-        return evidence.model_copy(update={"values": values})
+        return evidence.model_copy(
+            update={"values": values, "sources": sources, "source_as_of": source_as_of}
+        )

@@ -43,6 +43,20 @@ class ReverseDCFInputs(BaseModel):
             raise ValueError("current_annual_revenue must be positive")
         if self.cash_and_equivalents < 0 or self.total_debt < 0:
             raise ValueError("cash_and_equivalents and total_debt must be nonnegative")
+        required_availability = {
+            "current_share_price",
+            "diluted_shares_outstanding",
+            "cash_and_equivalents",
+            "total_debt",
+            "current_annual_revenue",
+            "current_free_cash_flow",
+            "current_fcf_margin",
+        }
+        missing_availability = required_availability - self.available_at.keys()
+        if missing_availability:
+            raise ValueError(
+                "missing availability timestamps: " + ", ".join(sorted(missing_availability))
+            )
         future = [k for k, v in self.available_at.items() if v > self.valuation_date]
         if future:
             raise ValueError(f"inputs unavailable at valuation date: {', '.join(sorted(future))}")
@@ -50,13 +64,18 @@ class ReverseDCFInputs(BaseModel):
 
     @property
     def enterprise_value(self) -> float:
-        return self.current_enterprise_value or (
-            (
-                self.market_capitalization
-                or self.current_share_price * self.diluted_shares_outstanding
+        return (
+            self.current_enterprise_value
+            if self.current_enterprise_value is not None
+            else (
+                (
+                    self.market_capitalization
+                    if self.market_capitalization is not None
+                    else self.current_share_price * self.diluted_shares_outstanding
+                )
+                + self.total_debt
+                - self.cash_and_equivalents
             )
-            + self.total_debt
-            - self.cash_and_equivalents
         )
 
 
@@ -68,7 +87,7 @@ class DCFScenario(BaseModel):
     terminal_fcf_margin: float
     discount_rate: float
     terminal_growth_rate: float
-    annual_dilution: float = Field(default=0, ge=0)
+    annual_dilution: float | None = Field(default=None, ge=0)
     explicit_forecast_years: int = Field(default=7, ge=5, le=10)
     revenue_growth_path: list[float] | None = None
     fcf_margin_path: list[float] | None = None
@@ -151,7 +170,11 @@ def value_dcf(inputs: ReverseDCFInputs, scenario: DCFScenario) -> DCFValuationRe
         projected: list[ProjectedYear] = []
         for year, (growth, margin) in enumerate(zip(growths, margins, strict=True), 1):
             revenue *= 1 + growth
-            shares *= 1 + scenario.annual_dilution
+            shares *= 1 + (
+                scenario.annual_dilution
+                if scenario.annual_dilution is not None
+                else inputs.expected_annual_dilution
+            )
             fcf = revenue * margin
             projected.append(
                 ProjectedYear(
@@ -170,6 +193,8 @@ def value_dcf(inputs: ReverseDCFInputs, scenario: DCFScenario) -> DCFValuationRe
             * (1 + scenario.terminal_growth_rate)
             / (scenario.discount_rate - scenario.terminal_growth_rate)
         )
+        if projected[-1].free_cash_flow <= 0 or not math.isfinite(projected[-1].free_cash_flow):
+            raise ValueError("terminal free cash flow must be positive and finite")
         if not math.isfinite(terminal):
             raise ValueError("terminal value is not finite")
         pv_terminal = terminal / (1 + scenario.discount_rate) ** scenario.explicit_forecast_years
@@ -236,12 +261,16 @@ def solve_reverse_dcf(
     scenario: DCFScenario,
     *,
     growth_bounds: tuple[float, float] = (-0.30, 0.60),
-    margin_bounds: tuple[float, float] = (-0.50, 0.60),
+    margin_bounds: tuple[float, float] = (0.001, 0.60),
     tolerance: float = 1.0,
     max_iterations: int = 100,
 ) -> ReverseDCFResult:
     if tolerance <= 0 or max_iterations <= 0:
         return ReverseDCFResult(diagnostics=["tolerance and max_iterations must be positive"])
+    if scenario.revenue_growth_path is not None or scenario.fcf_margin_path is not None:
+        return ReverseDCFResult(
+            diagnostics=["reverse solving is incompatible with explicit projection paths"]
+        )
     target = inputs.enterprise_value
     growth, growth_error = _solve(
         inputs, scenario, target, *growth_bounds, tolerance, max_iterations, "growth"
@@ -249,8 +278,16 @@ def solve_reverse_dcf(
     margin, margin_error = _solve(
         inputs, scenario, target, *margin_bounds, tolerance, max_iterations, "margin"
     )
-    grounded_growth = inputs.historical_revenue_growth_median or inputs.current_revenue_growth
-    grounded_margin = inputs.historical_fcf_margin_median or inputs.current_fcf_margin
+    grounded_growth = (
+        inputs.historical_revenue_growth_median
+        if inputs.historical_revenue_growth_median is not None
+        else inputs.current_revenue_growth
+    )
+    grounded_margin = (
+        inputs.historical_fcf_margin_median
+        if inputs.historical_fcf_margin_median is not None
+        else inputs.current_fcf_margin
+    )
     return ReverseDCFResult(
         implied_revenue_cagr=growth,
         implied_terminal_fcf_margin=margin,

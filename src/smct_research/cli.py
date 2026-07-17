@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -135,6 +136,50 @@ if __name__ == "__main__":
     app()
 
 
+def _load_reverse_dcf_config(path: Path) -> dict[str, dict[str, object]]:
+    """Load JSON or the bundled small YAML-compatible scenario mapping."""
+    text = path.read_text()
+    if path.suffix.lower() == ".json":
+        raw: object = json.loads(text)
+    else:
+        yaml_values: dict[str, object] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            if value.strip().startswith("{"):
+                normalized = re.sub(r"([A-Za-z_][A-Za-z0-9_]*):", r'"\1":', value.strip())
+                yaml_values[name] = json.loads(normalized)
+        raw = yaml_values
+    if isinstance(raw, dict) and "scenarios" in raw:
+        raw = raw["scenarios"]
+    if not isinstance(raw, dict):
+        raise ValueError("reverse DCF config must be a scenario mapping")
+    return {str(name): dict(value) for name, value in raw.items() if isinstance(value, dict)}
+
+
+def _merged_scenarios(payload: dict[str, object], config: Path | None) -> list[DCFScenario]:
+    default_path = Path("config/reverse_dcf.yaml")
+    config_data = (
+        _load_reverse_dcf_config(config or default_path)
+        if (config or default_path).exists()
+        else {}
+    )
+    explicit = payload.get("scenarios", [])
+    if isinstance(explicit, dict):
+        explicit = [
+            {"name": name, **value} for name, value in explicit.items() if isinstance(value, dict)
+        ]
+    merged = {name: {"name": name, **values} for name, values in config_data.items()}
+    for value in explicit if isinstance(explicit, list) else []:
+        if not isinstance(value, dict):
+            raise ValueError("scenarios must be objects")
+        name = str(value.get("name", "base"))
+        merged[name] = {**merged.get(name, {"name": name}), **value}
+    return [DCFScenario.model_validate(merged[name]) for name in sorted(merged)]
+
+
 @app.command()
 def dcf(
     input_file: Path,
@@ -145,12 +190,21 @@ def dcf(
     scenario: str = typer.Option("all"),
 ) -> None:
     """Run an offline deterministic scenario and reverse-DCF valuation."""
-    del config  # Input is self-contained; configuration may be merged by callers.
     payload = json.loads(input_file.read_text())
-    inputs = ReverseDCFInputs.model_validate(payload.get("inputs", payload))
+    input_data = payload.get("inputs", payload)
+    if not isinstance(input_data, dict):
+        raise typer.BadParameter("inputs must be an object")
     if as_of:
-        inputs.valuation_date = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
-    scenarios = [DCFScenario.model_validate(item) for item in payload.get("scenarios", [])]
+        try:
+            overridden = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise typer.BadParameter("--as-of must be an ISO-8601 timestamp") from error
+        input_data = {**input_data, "valuation_date": overridden}
+    try:
+        inputs = ReverseDCFInputs.model_validate(input_data)
+        scenarios = _merged_scenarios(payload, config)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
     if not scenarios:
         raise typer.BadParameter("input must include scenarios")
     selected = (
