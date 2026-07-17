@@ -34,8 +34,13 @@ def inputs(**overrides: object) -> ReverseDCFInputs:
         "current_free_cash_flow": 10,
         "current_fcf_margin": 0.1,
         "available_at": {name: NOW for name in required},
+        "provenance": {name: "test" for name in required},
     }
     data.update(overrides)
+    for name in overrides:
+        if name not in {"ticker", "valuation_date", "provenance", "available_at"}:
+            data["available_at"][name] = NOW  # type: ignore[index]
+            data["provenance"][name] = "test"  # type: ignore[index]
     return ReverseDCFInputs.model_validate(data)
 
 
@@ -71,7 +76,8 @@ def test_negative_fcf_transition_and_terminal_rules() -> None:
         result.valid
         and result.projected_years[0].free_cash_flow < 0 < result.projected_years[-1].free_cash_flow
     )
-    assert not value_dcf(inputs(), scenario(terminal_fcf_margin=0)).valid
+    with pytest.raises(ValueError, match="terminal_fcf_margin"):
+        scenario(terminal_fcf_margin=0)
 
 
 def test_monotonicity_and_sensitivity_is_deterministic() -> None:

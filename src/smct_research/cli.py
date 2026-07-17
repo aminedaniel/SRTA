@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 
 import typer
@@ -132,10 +133,6 @@ def screen(
         typer.echo(f"{rank:>3}  {item.ticker:<8} {score:>11}  {item.company_name}")
 
 
-if __name__ == "__main__":
-    app()
-
-
 def _load_reverse_dcf_config(path: Path) -> dict[str, dict[str, object]]:
     """Load JSON or the bundled small YAML-compatible scenario mapping."""
     text = path.read_text()
@@ -160,12 +157,12 @@ def _load_reverse_dcf_config(path: Path) -> dict[str, dict[str, object]]:
 
 
 def _merged_scenarios(payload: dict[str, object], config: Path | None) -> list[DCFScenario]:
-    default_path = Path("config/reverse_dcf.yaml")
-    config_data = (
-        _load_reverse_dcf_config(config or default_path)
-        if (config or default_path).exists()
-        else {}
-    )
+    if config is not None:
+        config_data = _load_reverse_dcf_config(config)
+    else:
+        packaged = files("smct_research.config").joinpath("reverse_dcf.yaml")
+        # importlib.resources resolves installed package data deterministically.
+        config_data = _load_reverse_dcf_config(Path(str(packaged)))
     explicit = payload.get("scenarios", [])
     if isinstance(explicit, dict):
         explicit = [
@@ -248,3 +245,7 @@ def dcf(
     if output_json:
         output_json.write_text(rendered + "\n")
     typer.echo(rendered)
+
+
+if __name__ == "__main__":
+    app()

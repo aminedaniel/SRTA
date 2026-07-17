@@ -50,6 +50,28 @@ class FeatureSnapshotAssembler:
         base_scenario = next((scenario for scenario in scenarios if scenario.name == "base"), None)
         if base and base.valid and base_scenario:
             reverse = solve_reverse_dcf(inputs, base_scenario)
+            input_age_days = max(
+                (inputs.valuation_date - timestamp).days
+                for timestamp in inputs.available_at.values()
+            )
+            annual_dilution = (
+                base_scenario.annual_dilution
+                if base_scenario.annual_dilution is not None
+                else inputs.expected_annual_dilution
+            )
+            age_penalty = min(0.40, max(0, input_age_days - 30) / 365)
+            dilution_penalty = min(0.30, max(0.0, annual_dilution - 0.02) * 5)
+            quality = max(
+                0.0,
+                min(
+                    1.0,
+                    1.0
+                    - max(0.0, base.terminal_value_share - 0.65)
+                    - 0.25 * len(reverse.diagnostics)
+                    - age_penalty
+                    - dilution_penalty,
+                ),
+            )
             values.update(
                 {
                     "dcf_base_upside_percent": base.upside_downside_percent,
@@ -58,22 +80,9 @@ class FeatureSnapshotAssembler:
                     "reverse_dcf_implied_terminal_fcf_margin": reverse.implied_terminal_fcf_margin,
                     "reverse_dcf_growth_gap": reverse.growth_gap,
                     "reverse_dcf_margin_gap": reverse.margin_gap,
-                    "dcf_model_quality_score": max(
-                        0.0,
-                        1.0
-                        - max(0.0, base.terminal_value_share - 0.65)
-                        - 0.25 * len(reverse.diagnostics),
-                    ),
-                    "dcf_annual_dilution": (
-                        base_scenario.annual_dilution
-                        if base_scenario.annual_dilution is not None
-                        else inputs.expected_annual_dilution
-                    ),
-                    "dcf_input_age_days": max(
-                        (inputs.valuation_date - date).days for date in inputs.available_at.values()
-                    )
-                    if inputs.available_at
-                    else 0,
+                    "dcf_model_quality_score": quality,
+                    "dcf_annual_dilution": annual_dilution,
+                    "dcf_input_age_days": input_age_days,
                 }
             )
             conservative = by_name.get("conservative")

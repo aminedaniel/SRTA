@@ -35,7 +35,16 @@ class ReverseDCFExpectationsSignal(ResearchSignal):
             score -= 20 * max(float(dilution) - 0.02, 0)
         if isinstance(age, (int, float)) and age > 30:
             score -= min(10, (float(age) - 30) / 10)
-        score = max(-25.0, min(25.0, score * max(0, min(1, quality))))
+        age_decay = (
+            min(0.50, max(0.0, (float(age) - 30) / 365)) if isinstance(age, (int, float)) else 0.25
+        )
+        dilution_decay = (
+            min(0.30, max(0.0, float(dilution) - 0.02) * 5)
+            if isinstance(dilution, (int, float))
+            else 0.15
+        )
+        confidence = max(0.0, min(1.0, quality * (1 - age_decay) * (1 - dilution_decay)))
+        score = max(-25.0, min(25.0, score * confidence))
         direction = (
             SignalDirection.POSITIVE
             if score > 2
@@ -47,7 +56,7 @@ class ReverseDCFExpectationsSignal(ResearchSignal):
             signal_id=self.id,
             ticker=snapshot.ticker,
             score=score,
-            confidence=max(0, min(1, quality)),
+            confidence=confidence,
             direction=direction,
             thesis="Scenario valuation suggests defensible upside; it is not a price target."
             if score > 2
@@ -68,5 +77,7 @@ class ReverseDCFExpectationsSignal(ResearchSignal):
                 "quality": quality,
                 "input_age_days": age,
                 "annual_dilution": dilution,
+                "age_decay": age_decay,
+                "dilution_decay": dilution_decay,
             },
         )

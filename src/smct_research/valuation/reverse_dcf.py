@@ -43,7 +43,7 @@ class ReverseDCFInputs(BaseModel):
             raise ValueError("current_annual_revenue must be positive")
         if self.cash_and_equivalents < 0 or self.total_debt < 0:
             raise ValueError("cash_and_equivalents and total_debt must be nonnegative")
-        required_availability = {
+        used_inputs = {
             "current_share_price",
             "diluted_shares_outstanding",
             "cash_and_equivalents",
@@ -52,11 +52,27 @@ class ReverseDCFInputs(BaseModel):
             "current_free_cash_flow",
             "current_fcf_margin",
         }
-        missing_availability = required_availability - self.available_at.keys()
+        if self.current_enterprise_value is not None:
+            used_inputs.add("current_enterprise_value")
+        elif self.market_capitalization is not None:
+            used_inputs.add("market_capitalization")
+        if self.expected_annual_dilution > 0:
+            used_inputs.add("expected_annual_dilution")
+        for name in (
+            "current_revenue_growth",
+            "historical_revenue_growth_median",
+            "historical_fcf_margin_median",
+        ):
+            if getattr(self, name) is not None:
+                used_inputs.add(name)
+        missing_availability = used_inputs - self.available_at.keys()
+        missing_provenance = used_inputs - self.provenance.keys()
         if missing_availability:
             raise ValueError(
                 "missing availability timestamps: " + ", ".join(sorted(missing_availability))
             )
+        if missing_provenance:
+            raise ValueError("missing provenance: " + ", ".join(sorted(missing_provenance)))
         future = [k for k, v in self.available_at.items() if v > self.valuation_date]
         if future:
             raise ValueError(f"inputs unavailable at valuation date: {', '.join(sorted(future))}")
@@ -91,6 +107,28 @@ class DCFScenario(BaseModel):
     explicit_forecast_years: int = Field(default=7, ge=5, le=10)
     revenue_growth_path: list[float] | None = None
     fcf_margin_path: list[float] | None = None
+
+    @model_validator(mode="after")
+    def valid(self) -> DCFScenario:
+        numeric = (
+            self.initial_revenue_growth,
+            self.terminal_revenue_growth,
+            self.terminal_fcf_margin,
+            self.discount_rate,
+            self.terminal_growth_rate,
+        )
+        if not all(math.isfinite(value) for value in numeric):
+            raise ValueError("scenario assumptions must be finite")
+        if self.discount_rate <= 0 or self.terminal_growth_rate >= self.discount_rate:
+            raise ValueError("discount_rate must be positive and exceed terminal_growth_rate")
+        if self.initial_revenue_growth <= -1 or self.terminal_revenue_growth <= -1:
+            raise ValueError("revenue growth must be greater than -100%")
+        if self.terminal_fcf_margin <= 0:
+            raise ValueError("terminal_fcf_margin must be positive")
+        for path in (self.revenue_growth_path, self.fcf_margin_path):
+            if path is not None and not all(math.isfinite(value) for value in path):
+                raise ValueError("explicit projection paths must be finite")
+        return self
 
 
 class ProjectedYear(BaseModel):
@@ -170,6 +208,8 @@ def value_dcf(inputs: ReverseDCFInputs, scenario: DCFScenario) -> DCFValuationRe
         projected: list[ProjectedYear] = []
         for year, (growth, margin) in enumerate(zip(growths, margins, strict=True), 1):
             revenue *= 1 + growth
+            if revenue <= 0 or not math.isfinite(revenue):
+                raise ValueError("projected revenue must be positive and finite")
             shares *= 1 + (
                 scenario.annual_dilution
                 if scenario.annual_dilution is not None
@@ -309,6 +349,8 @@ def sensitivity(
     terminal_margins: list[float],
     revenue_cagrs: list[float],
 ) -> list[DCFSensitivityResult]:
+    if scenario.revenue_growth_path is not None or scenario.fcf_margin_path is not None:
+        raise ValueError("sensitivity is incompatible with explicit projection paths")
     results = []
     for rate in discount_rates:
         for growth in terminal_growth_rates:
