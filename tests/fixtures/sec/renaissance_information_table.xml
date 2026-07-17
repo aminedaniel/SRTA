@@ -1,1 +1,6 @@
-<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable"><infoTable><nameOfIssuer>Example Inc</nameOfIssuer><cusip>123456789</cusip><value>100</value><shrsOrPrnAmt><sshPrnamt>1000</sshPrnamt></shrsOrPrnAmt></infoTable><infoTable><nameOfIssuer>Other Inc</nameOfIssuer><cusip>987654321</cusip><value>300</value><shrsOrPrnAmt><sshPrnamt>3000</sshPrnamt></shrsOrPrnAmt></infoTable></informationTable>
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <infoTable><nameOfIssuer>Example Inc</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>123456789</cusip><value>100</value><shrsOrPrnAmt><sshPrnamt>1000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+  <infoTable><nameOfIssuer>Example Inc</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>123456789</cusip><value>50</value><shrsOrPrnAmt><sshPrnamt>500</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+  <infoTable><nameOfIssuer>Option Inc</nameOfIssuer><titleOfClass>CALL</titleOfClass><cusip>111111111</cusip><value>80</value><putCall>CALL</putCall><shrsOrPrnAmt><sshPrnamt>100</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+  <infoTable><nameOfIssuer>Bond Inc</nameOfIssuer><titleOfClass>NOTE</titleOfClass><cusip>222222222</cusip><value>80</value><shrsOrPrnAmt><sshPrnamt>100</sshPrnamt><sshPrnamtType>OTHER</sshPrnamtType></shrsOrPrnAmt></infoTable>
+</informationTable>

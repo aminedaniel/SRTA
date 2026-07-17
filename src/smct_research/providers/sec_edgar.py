@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from smct_research.institutional_13f import (
+    Form13FHolding,
+    parse_amendment_type,
+    parse_information_table,
+)
 from smct_research.providers.base import (
     DataProvider,
     FixedRetryPolicy,
@@ -150,9 +156,10 @@ class Renaissance13FEdgarProvider(SecEdgarProvider):
         accessions = recent.get("accessionNumber", [])
         dates = recent.get("filingDate", [])
         documents = recent.get("primaryDocument", [])
+        reports = recent.get("reportDate", [])
         filings: list[dict[str, str]] = []
-        for form, accession, filing_date, document in zip(
-            forms, accessions, dates, documents, strict=True
+        for form, accession, filing_date, document, report_date in zip(
+            forms, accessions, dates, documents, reports, strict=True
         ):
             if form in {"13F-HR", "13F-HR/A"}:
                 filings.append(
@@ -161,9 +168,40 @@ class Renaissance13FEdgarProvider(SecEdgarProvider):
                         "accession_number": accession,
                         "filing_date": filing_date,
                         "primary_document": document,
+                        "reporting_quarter": report_date,
                     }
                 )
         return filings
+
+    def renaissance_13f_holdings(
+        self, ticker_for_cusip: Callable[[str], str | None] | None = None
+    ) -> list[Form13FHolding]:
+        """Fetch each filing's actual information table, not merely its cover page."""
+        holdings: list[Form13FHolding] = []
+        for filing in self.renaissance_13f_filings():
+            cover = self.filing_document(filing["accession_number"], filing["primary_document"])
+            amendment_type = parse_amendment_type(filing["form"], cover)
+            index = json.loads(self.filing_document(filing["accession_number"], "index.json"))
+            items = index.get("directory", {}).get("item", [])
+            candidates = [
+                item.get("name", "")
+                for item in items
+                if item.get("name", "").lower().endswith(".xml")
+                and item.get("name") != filing["primary_document"]
+            ]
+            for document in candidates:
+                rows = parse_information_table(
+                    self.filing_document(filing["accession_number"], document),
+                    reporting_quarter=date.fromisoformat(filing["reporting_quarter"]),
+                    filing_date=date.fromisoformat(filing["filing_date"]),
+                    accession_number=filing["accession_number"],
+                    amendment_type=amendment_type,
+                    ticker_for_cusip=ticker_for_cusip,
+                )
+                if rows:
+                    holdings.extend(rows)
+                    break
+        return holdings
 
     def filing_document(self, accession_number: str, document_name: str) -> bytes:
         accession = accession_number.replace("-", "")
