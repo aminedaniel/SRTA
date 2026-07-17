@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ from smct_research.core.models import FeatureSnapshot
 from smct_research.core.signal import SignalRegistry
 from smct_research.estimates.models import EstimateMetric
 from smct_research.estimates.service import calculate_features
+from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.io import load_feature_snapshots, load_universe, write_csv, write_json
@@ -274,23 +276,24 @@ def revisions(
         result = calculate_features(
             records, ticker, metric, timestamp, selected_period, lookback_tolerance_days
         )
-    except (ValueError, OSError) as error:
+    except (ProviderResponseError, ValueError, OSError, TypeError) as error:
         raise typer.BadParameter(str(error)) from error
     payload = result.model_dump(mode="json")
     rendered = json.dumps(payload, indent=2)
     if output_json:
         output_json.write_text(rendered + "\n")
     if output_csv:
-        rows = [
-            {
-                "ticker": result.ticker,
-                "metric": result.metric.value,
-                "current": result.current.consensus,
-                "quality_score": result.quality.score,
-                **{f"revision_{days}d": item.value for days, item in result.revisions.items()},
-            }
-        ]
-        write_csv(output_csv, rows)  # type: ignore[arg-type]
+        row = {
+            "ticker": result.ticker,
+            "metric": result.metric.value,
+            "current": result.current.consensus,
+            "quality_score": result.quality.score,
+            **{f"revision_{days}d": item.value for days, item in result.revisions.items()},
+        }
+        with output_csv.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
     typer.echo(rendered)
 
 

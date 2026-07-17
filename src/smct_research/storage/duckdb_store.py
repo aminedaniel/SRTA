@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from smct_research.estimates.models import ConsensusEstimate
 
+from smct_research.estimates.models import ConsensusEstimate
 from smct_research.financials.models import FeatureValue, FinancialObservation
 
 
@@ -117,8 +118,6 @@ class LocalAnalyticalStore:
 
     def store_estimate_snapshots(self, snapshots: Iterable[ConsensusEstimate]) -> None:
         """Append immutable normalized consensus observations; duplicates are ignored."""
-        from smct_research.estimates.models import ConsensusEstimate
-
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS estimate_snapshots ("
             "provider VARCHAR, provider_record_id VARCHAR, ticker VARCHAR, metric VARCHAR, "
@@ -134,8 +133,31 @@ class LocalAnalyticalStore:
         for item in snapshots:
             if not isinstance(item, ConsensusEstimate):
                 raise TypeError("snapshots must contain ConsensusEstimate")
+            existing = self.connection.execute(
+                "SELECT * FROM estimate_snapshots WHERE provider = ? AND provider_record_id = ?",
+                [item.provider, item.provider_record_id],
+            ).fetchone()
+            logical = self.connection.execute(
+                "SELECT provider_record_id FROM estimate_snapshots WHERE ticker = ? AND metric = ? "
+                "AND target_period_end = ? AND basis = ? AND available_at = ? AND provider = ?",
+                [
+                    item.ticker,
+                    item.metric.value,
+                    item.target_period_end,
+                    item.basis.value,
+                    item.available_at,
+                    item.provider,
+                ],
+            ).fetchone()
+            if existing is not None or logical is not None:
+                if existing is not None and existing[0:2] == (
+                    item.provider,
+                    item.provider_record_id,
+                ):
+                    continue
+                raise ValueError("conflicting immutable estimate snapshot")
             self.connection.execute(
-                "INSERT OR IGNORE INTO estimate_snapshots VALUES "
+                "INSERT INTO estimate_snapshots VALUES "
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     item.provider,
@@ -158,3 +180,13 @@ class LocalAnalyticalStore:
                     item.available_at,
                 ],
             )
+
+    def load_estimate_snapshots(self) -> list[ConsensusEstimate]:
+        """Read persisted snapshots for deterministic round-trip verification."""
+        rows = self.connection.execute(
+            "SELECT * FROM estimate_snapshots ORDER BY available_at, provider_record_id"
+        ).fetchall()
+        names = [item[0] for item in self.connection.description]
+        return [
+            ConsensusEstimate.model_validate(dict(zip(names, row, strict=True))) for row in rows
+        ]

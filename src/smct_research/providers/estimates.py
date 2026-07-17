@@ -46,6 +46,7 @@ class OfflineEstimateProvider:
     def normalize_estimates(self, raw_records: Iterable[dict[str, Any]]) -> list[ConsensusEstimate]:
         values = []
         seen: dict[str, ConsensusEstimate] = {}
+        logical: dict[tuple[object, ...], ConsensusEstimate] = {}
         for raw in raw_records:
             try:
                 item = ConsensusEstimate.model_validate(
@@ -60,6 +61,13 @@ class OfflineEstimateProvider:
                 raise ProviderResponseError(
                     f"duplicate provider record ID: {item.provider_record_id}"
                 )
+            logical_key = (*item.identity, item.available_at)
+            conflict = logical.get(logical_key)
+            if conflict is not None and conflict.model_dump(mode="json") != item.model_dump(
+                mode="json"
+            ):
+                raise ProviderResponseError("conflicting logical estimate snapshot")
+            logical[logical_key] = item
             seen[item.provider_record_id] = item
             values.append(item)
         return sorted(values, key=lambda x: (x.available_at, x.provider_record_id))

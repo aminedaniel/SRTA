@@ -1,4 +1,4 @@
-"""Canonical, point-in-time consensus estimate records."""
+"""Canonical, immutable point-in-time consensus estimate records."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ class ConsensusEstimate(BaseModel):
     high: float | None = None
     low: float | None = None
     standard_deviation: float | None = None
+    estimate_breadth: float | None = None
     provider: str
     provider_record_id: str
     source_identifier: str
@@ -54,13 +55,26 @@ class ConsensusEstimate(BaseModel):
     def valid(self):
         self.ticker = self.ticker.upper().strip()
         self.currency = self.currency.upper().strip()
+        self.provider = self.provider.strip()
         self.retrieved_at = normalize_utc(self.retrieved_at)
         self.available_at = normalize_utc(self.available_at)
         if self.published_at:
             self.published_at = normalize_utc(self.published_at)
-        if not self.unit.strip() or not self.currency.isalpha() or len(self.currency) != 3:
-            raise ValueError("unsupported unit or currency")
-        for value in (self.consensus, self.high, self.low, self.standard_deviation):
+        if (
+            not self.provider
+            or not self.provider_record_id
+            or not self.unit.strip()
+            or not self.currency.isalpha()
+            or len(self.currency) != 3
+        ):
+            raise ValueError("missing or unsupported estimate identity")
+        for value in (
+            self.consensus,
+            self.high,
+            self.low,
+            self.standard_deviation,
+            self.estimate_breadth,
+        ):
             if value is not None and not isfinite(value):
                 raise ValueError("estimate values must be finite")
         if self.analyst_count is not None and self.analyst_count < 0:
@@ -72,6 +86,7 @@ class ConsensusEstimate(BaseModel):
     @property
     def identity(self) -> tuple[object, ...]:
         return (
+            self.provider,
             self.ticker,
             self.metric,
             self.target_period_end,
@@ -93,6 +108,7 @@ class EstimateRevision(BaseModel):
     conventional: float | None = None
     symmetric: float | None = None
     used_symmetric: bool = False
+    prior: ConsensusEstimate | None = None
     diagnostics: list[str] = Field(default_factory=list)
 
 
@@ -110,5 +126,12 @@ class EstimateRevisionFeatures(BaseModel):
     revisions: dict[int, EstimateRevision]
     acceleration: float | None = None
     streak: int = 0
+    analyst_count_change_30d: float | int | None = None
+    high_change_30d: float | None = None
+    low_change_30d: float | None = None
+    dispersion_change_30d: float | None = None
+    breadth_change_30d: float | None = None
+    days_since_latest_update: int
+    sign_transition: str | None = None
     quality: EstimateDataQuality
     diagnostics: list[str] = Field(default_factory=list)

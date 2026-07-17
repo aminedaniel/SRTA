@@ -95,37 +95,59 @@ class FeatureSnapshotAssembler:
     def add_estimate_revision_features(
         self, evidence: FeatureAssemblyInput, features: object
     ) -> FeatureAssemblyInput:
-        """Attach point-in-time estimate features without manufacturing absent history."""
+        """Attach revision evidence; every selected snapshot retains provenance."""
         from smct_research.estimates.models import EstimateRevisionFeatures
 
         if not isinstance(features, EstimateRevisionFeatures):
             raise TypeError("features must be EstimateRevisionFeatures")
         if features.as_of > evidence.as_of:
             raise ValueError("estimate evidence cannot be newer than feature snapshot")
-        prefix = "eps" if features.metric.value == "eps" else features.metric.value
+        prefix = features.metric.value
         values, sources, source_as_of = (
             dict(evidence.values),
             dict(evidence.sources),
             dict(evidence.source_as_of),
         )
-        values[f"{prefix}_consensus_current"] = features.current.consensus
-        values[f"{prefix}_revision_acceleration"] = features.acceleration
-        values[f"{prefix}_revision_streak"] = features.streak
-        values[f"{prefix}_analyst_count"] = features.current.analyst_count
-        values[f"{prefix}_dispersion_current"] = features.current.standard_deviation
-        values[f"{prefix}_consensus_age_days"] = (
-            features.as_of - features.current.available_at
-        ).days
+        values.update(
+            {
+                f"{prefix}_consensus_current": features.current.consensus,
+                f"{prefix}_revision_acceleration": features.acceleration,
+                f"{prefix}_revision_streak": features.streak,
+                f"{prefix}_analyst_count": features.current.analyst_count,
+                f"{prefix}_analyst_count_change_30d": features.analyst_count_change_30d,
+                f"{prefix}_high_change_30d": features.high_change_30d,
+                f"{prefix}_low_change_30d": features.low_change_30d,
+                f"{prefix}_dispersion_current": features.current.standard_deviation,
+                f"{prefix}_dispersion_change_30d": features.dispersion_change_30d,
+                f"{prefix}_estimate_breadth_change_30d": features.breadth_change_30d,
+                f"{prefix}_consensus_age_days": features.days_since_latest_update,
+                f"{prefix}_sign_transition": features.sign_transition,
+                f"{prefix}_revision_quality_score": features.quality.score,
+                f"{prefix}_revision_coverage_percentage": features.quality.coverage_percentage,
+                f"{prefix}_target_period_end": features.current.target_period_end.isoformat(),
+                f"{prefix}_target_period_rollover": "target_period_rollover"
+                in features.diagnostics,
+                f"{prefix}_revision_diagnostics": ";".join(features.diagnostics),
+            }
+        )
         for days, revision in features.revisions.items():
             values[f"{prefix}_revision_{days}d"] = revision.value
-        values["estimate_revision_quality_score"] = features.quality.score
-        values["estimate_revision_coverage_percentage"] = features.quality.coverage_percentage
-        values["estimate_target_period_end"] = features.current.target_period_end.isoformat()
-        values["estimate_target_period_rollover"] = "target_period_rollover" in features.diagnostics
-        values["estimate_revision_diagnostics"] = ";".join(features.diagnostics)
-        key = f"estimates:{features.current.provider}:{features.current.provider_record_id}"
+            if revision.prior:
+                key = (
+                    f"estimates:{prefix}:{days}d:{revision.prior.provider}:"
+                    f"{revision.prior.provider_record_id}"
+                )
+                sources[key] = revision.prior.source_identifier
+                source_as_of[key] = revision.prior.available_at
+        key = (
+            f"estimates:{prefix}:current:{features.current.provider}:"
+            f"{features.current.provider_record_id}"
+        )
         sources[key] = features.current.source_identifier
         source_as_of[key] = features.current.available_at
+        # EPS is the required A3 core; generic aliases are therefore written only once.
+        if prefix == "eps":
+            values["estimate_revision_quality_score"] = features.quality.score
         return evidence.model_copy(
             update={"values": values, "sources": sources, "source_as_of": source_as_of}
         )
