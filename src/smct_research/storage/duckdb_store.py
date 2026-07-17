@@ -6,7 +6,10 @@ import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from smct_research.estimates.models import ConsensusEstimate
 
 from smct_research.financials.models import FeatureValue, FinancialObservation
 
@@ -111,3 +114,47 @@ class LocalAnalyticalStore:
         self.connection.executemany("INSERT INTO feature_export VALUES (?, ?, ?, ?, ?, ?)", rows)
         escaped = str(path).replace("'", "''")
         self.connection.execute(f"COPY feature_export TO '{escaped}' (FORMAT PARQUET)")
+
+    def store_estimate_snapshots(self, snapshots: Iterable[ConsensusEstimate]) -> None:
+        """Append immutable normalized consensus observations; duplicates are ignored."""
+        from smct_research.estimates.models import ConsensusEstimate
+
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS estimate_snapshots ("
+            "provider VARCHAR, provider_record_id VARCHAR, ticker VARCHAR, metric VARCHAR, "
+            "target_period_end DATE, period_type VARCHAR, unit VARCHAR, currency VARCHAR, "
+            "basis VARCHAR, "
+            "consensus DOUBLE, analyst_count INTEGER, high DOUBLE, low DOUBLE, "
+            "standard_deviation DOUBLE, "
+            "source_identifier VARCHAR, published_at TIMESTAMP, retrieved_at TIMESTAMP, "
+            "available_at TIMESTAMP, "
+            "PRIMARY KEY(provider, provider_record_id), "
+            "UNIQUE(ticker, metric, target_period_end, basis, available_at, provider))"
+        )
+        for item in snapshots:
+            if not isinstance(item, ConsensusEstimate):
+                raise TypeError("snapshots must contain ConsensusEstimate")
+            self.connection.execute(
+                "INSERT OR IGNORE INTO estimate_snapshots VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    item.provider,
+                    item.provider_record_id,
+                    item.ticker,
+                    item.metric.value,
+                    item.target_period_end,
+                    item.period_type.value,
+                    item.unit,
+                    item.currency,
+                    item.basis.value,
+                    item.consensus,
+                    item.analyst_count,
+                    item.high,
+                    item.low,
+                    item.standard_deviation,
+                    item.source_identifier,
+                    item.published_at,
+                    item.retrieved_at,
+                    item.available_at,
+                ],
+            )

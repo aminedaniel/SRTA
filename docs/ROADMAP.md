@@ -43,3 +43,8 @@
 - Value-trap and permanent-impairment analysis
 - Signal ablation and combination analysis
 - Sector and market-regime robustness
+
+## Milestone 2.5 — Estimate revisions
+
+- Deterministic offline consensus normalization, immutable point-in-time snapshots, and fiscal-period-safe revision velocity
+- A3 Consensus Estimate Revision Velocity on the ranked discovery screen

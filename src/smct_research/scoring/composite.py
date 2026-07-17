@@ -19,6 +19,7 @@ class CompositeResearchScorer:
         self.weights = weights or {
             "A1": 1.25,
             "A2": 1.10,
+            "A3": 1.00,
             "F1": 0.75,
             "E2": 0.90,
             "E3": 0.85,
