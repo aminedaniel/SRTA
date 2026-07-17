@@ -151,3 +151,25 @@ def test_mismatched_explicit_path_and_invalid_terminal_growth_are_rejected() -> 
         scenario(revenue_growth_path=[0.1] * 4)
     with pytest.raises(ValueError, match="terminal_growth_rate"):
         scenario(terminal_growth_rate=-1.0)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("current_share_price", float("inf")),
+        ("cash_and_equivalents", float("inf")),
+        ("total_debt", float("inf")),
+        ("current_enterprise_value", float("inf")),
+        ("current_fcf_margin", float("nan")),
+        ("current_revenue_growth", float("inf")),
+    ],
+)
+def test_nonfinite_inputs_are_rejected(field: str, value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        inputs(**{field: value})
+
+
+def test_explicit_zero_dilution_requires_and_preserves_evidence() -> None:
+    item = inputs(expected_annual_dilution=0.0)
+    assert item.available_at["expected_annual_dilution"] == NOW
+    assert item.provenance["expected_annual_dilution"] == "test"

@@ -43,6 +43,30 @@ class ReverseDCFInputs(BaseModel):
             raise ValueError("current_annual_revenue must be positive")
         if self.cash_and_equivalents < 0 or self.total_debt < 0:
             raise ValueError("cash_and_equivalents and total_debt must be nonnegative")
+        numeric_fields = (
+            "current_share_price",
+            "diluted_shares_outstanding",
+            "cash_and_equivalents",
+            "total_debt",
+            "current_annual_revenue",
+            "current_free_cash_flow",
+            "current_fcf_margin",
+            "stock_based_compensation",
+            "current_revenue_growth",
+            "historical_revenue_growth_median",
+            "historical_fcf_margin_median",
+            "expected_annual_dilution",
+            "tax_rate",
+            "market_capitalization",
+            "current_enterprise_value",
+        )
+        nonfinite = [
+            name
+            for name in numeric_fields
+            if getattr(self, name) is not None and not math.isfinite(getattr(self, name))
+        ]
+        if nonfinite:
+            raise ValueError("numeric inputs must be finite: " + ", ".join(sorted(nonfinite)))
         used_inputs = {
             "current_share_price",
             "diluted_shares_outstanding",
@@ -56,7 +80,8 @@ class ReverseDCFInputs(BaseModel):
             used_inputs.add("current_enterprise_value")
         elif self.market_capitalization is not None:
             used_inputs.add("market_capitalization")
-        if self.expected_annual_dilution > 0:
+        if self.expected_annual_dilution > 0 or "expected_annual_dilution" in self.model_fields_set:
+            # Explicit zero is a configured dilution assumption and needs evidence too.
             used_inputs.add("expected_annual_dilution")
         for name in (
             "current_revenue_growth",
@@ -265,6 +290,19 @@ def value_dcf(inputs: ReverseDCFInputs, scenario: DCFScenario) -> DCFValuationRe
         ev = pv_explicit + pv_terminal
         equity = ev + inputs.cash_and_equivalents - inputs.total_debt
         per_share = equity / projected[-1].diluted_shares
+        output_values = [
+            *(item.free_cash_flow for item in projected),
+            *(item.present_value_fcf for item in projected),
+            pv_explicit,
+            terminal,
+            ev,
+            equity,
+            per_share,
+            per_share / inputs.current_share_price - 1,
+            pv_terminal / ev if ev else 0,
+        ]
+        if not all(math.isfinite(value) for value in output_values):
+            raise ValueError("DCF valuation output is not finite")
         return DCFValuationResult(
             scenario=scenario.name,
             projected_years=projected,
