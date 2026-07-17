@@ -138,3 +138,16 @@ def test_invalid_sensitivity_cells_are_reported() -> None:
 def test_sensitivity_rejects_explicit_paths() -> None:
     with pytest.raises(ValueError, match="explicit projection paths"):
         sensitivity(inputs(), scenario(revenue_growth_path=[0.1] * 5), [0.1], [0.03], [0.1], [0.1])
+
+
+@pytest.mark.parametrize("field", ["revenue_growth_path", "fcf_margin_path"])
+def test_empty_explicit_paths_are_rejected(field: str) -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        scenario(**{field: []})
+
+
+def test_mismatched_explicit_path_and_invalid_terminal_growth_are_rejected() -> None:
+    with pytest.raises(ValueError, match="match explicit_forecast_years"):
+        scenario(revenue_growth_path=[0.1] * 4)
+    with pytest.raises(ValueError, match="terminal_growth_rate"):
+        scenario(terminal_growth_rate=-1.0)

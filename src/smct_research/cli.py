@@ -217,29 +217,32 @@ def dcf(
             "reverse": solve_reverse_dcf(inputs, item).model_dump(mode="json"),
         }
         if sensitivity_output:
-            record["sensitivity"] = [
-                x.model_dump(mode="json")
-                for x in sensitivity(
-                    inputs,
-                    item,
-                    [item.discount_rate - 0.01, item.discount_rate, item.discount_rate + 0.01],
-                    [
-                        item.terminal_growth_rate - 0.005,
-                        item.terminal_growth_rate,
-                        item.terminal_growth_rate + 0.005,
-                    ],
-                    [
-                        item.terminal_fcf_margin - 0.05,
-                        item.terminal_fcf_margin,
-                        item.terminal_fcf_margin + 0.05,
-                    ],
-                    [
-                        item.initial_revenue_growth - 0.05,
-                        item.initial_revenue_growth,
-                        item.initial_revenue_growth + 0.05,
-                    ],
-                )
-            ]
+            try:
+                record["sensitivity"] = [
+                    x.model_dump(mode="json")
+                    for x in sensitivity(
+                        inputs,
+                        item,
+                        [item.discount_rate - 0.01, item.discount_rate, item.discount_rate + 0.01],
+                        [
+                            item.terminal_growth_rate - 0.005,
+                            item.terminal_growth_rate,
+                            item.terminal_growth_rate + 0.005,
+                        ],
+                        [
+                            item.terminal_fcf_margin - 0.05,
+                            item.terminal_fcf_margin,
+                            item.terminal_fcf_margin + 0.05,
+                        ],
+                        [
+                            item.initial_revenue_growth - 0.05,
+                            item.initial_revenue_growth,
+                            item.initial_revenue_growth + 0.05,
+                        ],
+                    )
+                ]
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from error
         output.append(record)
     rendered = json.dumps(output, indent=2)
     if output_json:

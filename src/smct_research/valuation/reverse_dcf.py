@@ -121,17 +121,30 @@ class DCFScenario(BaseModel):
         )
         if not all(math.isfinite(value) for value in numeric):
             raise ValueError("scenario assumptions must be finite")
-        if self.discount_rate <= 0 or self.terminal_growth_rate >= self.discount_rate:
-            raise ValueError("discount_rate must be positive and exceed terminal_growth_rate")
+        if (
+            self.discount_rate <= 0
+            or self.terminal_growth_rate >= self.discount_rate
+            or self.terminal_growth_rate <= -1
+        ):
+            raise ValueError(
+                "terminal_growth_rate must exceed -100% and remain below positive discount_rate"
+            )
         if self.initial_revenue_growth <= -1 or self.terminal_revenue_growth <= -1:
             raise ValueError("revenue growth must be greater than -100%")
         if self.terminal_fcf_margin <= 0:
             raise ValueError("terminal_fcf_margin must be positive")
-        if self.revenue_growth_path is not None:
-            if not all(math.isfinite(value) and value > -1 for value in self.revenue_growth_path):
+        for label, path in (
+            ("revenue growth", self.revenue_growth_path),
+            ("FCF margin", self.fcf_margin_path),
+        ):
+            if path is not None and (not path or len(path) != self.explicit_forecast_years):
                 raise ValueError(
-                    "revenue growth path entries must be finite and greater than -100%"
+                    f"{label} path must be non-empty and match explicit_forecast_years"
                 )
+        if self.revenue_growth_path is not None and not all(
+            math.isfinite(value) and value > -1 for value in self.revenue_growth_path
+        ):
+            raise ValueError("revenue growth path entries must be finite and greater than -100%")
         if self.fcf_margin_path is not None:
             if not all(math.isfinite(value) for value in self.fcf_margin_path):
                 raise ValueError("FCF margin path entries must be finite")
