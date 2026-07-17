@@ -12,6 +12,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from smct_research.form4 import Form4Filing, Form4Transaction, parse_form4_filing
 from smct_research.institutional_13f import (
     Form13FHolding,
     parse_amendment_type,
@@ -138,6 +139,72 @@ class SecEdgarProvider(DataProvider):
         if not isinstance(data, dict):
             raise ProviderResponseError(f"Cached SEC JSON must be an object: {path}")
         return data
+
+    def form4_filings(self, issuer_cik: str | int) -> list[dict[str, str]]:
+        """List issuer Form 4 and Form 4/A filings from SEC submissions metadata."""
+        submissions = self.submissions(issuer_cik)
+        histories = [submissions.get("filings", {}).get("recent", {})]
+        for archived in submissions.get("filings", {}).get("files", []):
+            name = archived.get("name")
+            if name:
+                histories.append(self._get_json(f"submissions/{name}", f"submissions/{name}"))
+        filings: list[dict[str, str]] = []
+        for history in histories:
+            for form, accession, filed, document in zip(
+                history.get("form", []),
+                history.get("accessionNumber", []),
+                history.get("filingDate", []),
+                history.get("primaryDocument", []),
+                strict=True,
+            ):
+                if form in {"4", "4/A"}:
+                    filings.append(
+                        {
+                            "form": form,
+                            "accession_number": accession,
+                            "filing_date": filed,
+                            "primary_document": document,
+                        }
+                    )
+        return sorted(
+            filings, key=lambda filing: (filing["filing_date"], filing["accession_number"])
+        )
+
+    def form4_filing_records(self, issuer_cik: str | int) -> list[Form4Filing]:
+        """Fetch filings with metadata, including amendments with no purchase rows."""
+        records: list[Form4Filing] = []
+        cik = str(int(str(issuer_cik)))
+        for filing in self.form4_filings(issuer_cik):
+            accession = filing["accession_number"].replace("-", "")
+            document = filing["primary_document"]
+            cache_path = self.cache_dir / "form4" / accession / document
+            if cache_path.exists():
+                payload = cache_path.read_bytes()
+            else:
+                self.rate_limiter.acquire()
+                payload = self.transport(
+                    f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}",
+                    {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"},
+                )
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(payload)
+            records.append(
+                parse_form4_filing(
+                    payload,
+                    filing_date=date.fromisoformat(filing["filing_date"]),
+                    accession_number=filing["accession_number"],
+                    is_amendment=filing["form"] == "4/A",
+                )
+            )
+        return records
+
+    def form4_transactions(self, issuer_cik: str | int) -> list[Form4Transaction]:
+        """Return qualifying transactions; use ``form4_filing_records`` for replacement metadata."""
+        return [
+            transaction
+            for filing in self.form4_filing_records(issuer_cik)
+            for transaction in filing.transactions
+        ]
 
 
 class Renaissance13FEdgarProvider(SecEdgarProvider):

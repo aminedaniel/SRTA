@@ -35,31 +35,23 @@ class CongressionalPurchaseSignal(ResearchSignal):
         estimated_purchase_usd = max(
             0.0, snapshot.require_float("congress_estimated_purchase_usd_90d")
         )
-        latest_age_days = max(
-            0.0, snapshot.require_float("congress_latest_purchase_age_days")
-        )
+        latest_age_days = max(0.0, snapshot.require_float("congress_latest_purchase_age_days"))
         disclosure_lag_days = max(
             0.0, snapshot.require_float("congress_median_disclosure_lag_days")
         )
         committee_relevance = self._bounded_percent(
             snapshot.require_float("congress_committee_relevance_score")
         )
-        repeat_buyer = self._bounded_percent(
-            snapshot.require_float("congress_repeat_buyer_score")
-        )
+        repeat_buyer = self._bounded_percent(snapshot.require_float("congress_repeat_buyer_score"))
 
         total_transactions = purchases + sales
-        net_flow = (
-            (purchases - sales) / total_transactions if total_transactions > 0 else 0.0
-        )
+        net_flow = (purchases - sales) / total_transactions if total_transactions > 0 else 0.0
         buyer_breadth = min(unique_buyers / 4.0, 1.0)
         purchase_size = min(math.log10(1.0 + estimated_purchase_usd) / 6.0, 1.0)
 
         # The market cannot react before disclosure. Both stale transactions and
         # slow disclosure reduce the usefulness of the observation.
-        timeliness = math.exp(-latest_age_days / 120.0) * math.exp(
-            -disclosure_lag_days / 90.0
-        )
+        timeliness = math.exp(-latest_age_days / 120.0) * math.exp(-disclosure_lag_days / 90.0)
 
         positive_alignment = (
             0.40 * buyer_breadth
@@ -71,9 +63,7 @@ class CongressionalPurchaseSignal(ResearchSignal):
         score = max(-100.0, min(100.0, raw_score))
 
         observation_depth = min(1.0, unique_buyers / 4.0 + total_transactions / 20.0)
-        confidence = (0.30 + 0.60 * observation_depth) * math.exp(
-            -disclosure_lag_days / 180.0
-        )
+        confidence = (0.30 + 0.60 * observation_depth) * math.exp(-disclosure_lag_days / 180.0)
         confidence = max(0.15, min(0.90, confidence))
 
         if score >= 25:
@@ -90,10 +80,7 @@ class CongressionalPurchaseSignal(ResearchSignal):
             )
         else:
             direction = SignalDirection.NEUTRAL
-            thesis = (
-                "Congressional transaction disclosures do not provide a strong current "
-                "signal."
-            )
+            thesis = "Congressional transaction disclosures do not provide a strong current signal."
 
         return SignalResult(
             signal_id=self.id,
