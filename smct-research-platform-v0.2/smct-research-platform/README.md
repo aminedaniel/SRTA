@@ -26,3 +26,12 @@ smct evaluate examples/sample_snapshot.json
 ```
 
 See `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and `docs/CONGRESSIONAL_DISCLOSURES.md` for the design and implementation sequence.
+
+## Milestone 2 local financial evidence
+
+The SEC EDGAR adapter is free-first: it downloads Company Facts and submission-history JSON with a
+local disk cache, then stores raw metadata and immutable normalized observations in local DuckDB.
+Feature snapshots can be exported to Parquet. Set an identifiable SEC user agent with contact email,
+for example in PowerShell: `$env:SMCT_SEC_USER_AGENT = "SMCT Research you@example.com"`.
+No network is required for the test suite; tests use local fixtures. Reddit remains optional and is
+disabled by default in any ingestion workflow.
