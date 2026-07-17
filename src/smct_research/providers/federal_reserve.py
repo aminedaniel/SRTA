@@ -213,25 +213,28 @@ class FederalReserveProvider(DataProvider):
             if item.get("value") == ".":
                 continue
             observed = datetime.fromisoformat(item["date"]).date()
-            available = availability_by_observation.get(observed)
-            if available is None:
+            original_available = availability_by_observation.get(observed)
+            vintage_available = _date_field(item, "realtime_start")
+            if original_available is None or vintage_available is None:
                 raise ValueError(
-                    f"{series_id} observation {observed} lacks original public availability"
+                    f"{series_id} observation {observed} lacks complete vintage availability"
                 )
             result.append(
                 MacroObservation(
                     series_id=series_id,
                     observation_date=observed,
-                    publication_date=available,
-                    first_available_on=available,
-                    vintage_date=_date_field(item, "realtime_start"),
+                    publication_date=vintage_available,
+                    first_available_on=original_available,
+                    vintage_date=vintage_available,
                     retrieved_at=retrieved,
                     value=float(item["value"]),
                     unit=definition.unit,
                     source="alfred",
-                    revision_status=RevisionStatus.REVISED
-                    if definition.revisions_occur
-                    else RevisionStatus.INITIAL,
+                    revision_status=(
+                        RevisionStatus.REVISED
+                        if definition.revisions_occur and vintage_available > original_available
+                        else RevisionStatus.INITIAL
+                    ),
                     frequency=definition.frequency,
                     provenance_url="https://fred.stlouisfed.org/series/" + series_id,
                     point_in_time_eligible=True,

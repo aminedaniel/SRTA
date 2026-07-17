@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from smct_research.macro.models import MacroFeature, MacroObservation
 
@@ -16,8 +16,8 @@ def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str
         o
         for o in observations
         if o.point_in_time_eligible
-        and o.first_available_on is not None
-        and o.first_available_on <= as_of
+        and o.point_in_time_available_on is not None
+        and o.point_in_time_available_on <= as_of
     ]
     by_id: dict[str, list[MacroObservation]] = {}
     for item in usable:
@@ -37,7 +37,11 @@ def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str
 
     def put(name: str, value: float | str | None, *series: str) -> None:
         sources = [latest(series_id) for series_id in series]
-        dates = [item.first_available_on for item in sources if item and item.first_available_on]
+        dates = [
+            item.point_in_time_available_on
+            for item in sources
+            if item and item.point_in_time_available_on
+        ]
         complete = len(dates) == len(series) and value is not None
         output[name] = MacroFeature(
             name=name,
@@ -118,6 +122,36 @@ def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str
     put("regime_confidence", quality)
     put("macro_data_quality_score", quality)
     return output
+
+
+def derive_regime_as_retrieved(
+    observations: list[MacroObservation], retrieved_at: datetime
+) -> dict[str, MacroFeature]:
+    """Evaluate a current snapshot as retrieved, without claiming historical availability.
+
+    Current FRED values may only participate when their retrieval timestamp is no later
+    than the requested snapshot timestamp.  This is suitable for monitoring and is not
+    a substitute for ALFRED-backed historical evaluation.
+    """
+    snapshot_date = retrieved_at.date()
+    visible: list[MacroObservation] = []
+    for observation in observations:
+        if observation.retrieved_at > retrieved_at:
+            continue
+        if observation.source == "fred_current":
+            visible.append(
+                observation.model_copy(
+                    update={
+                        "point_in_time_eligible": True,
+                        "publication_date": snapshot_date,
+                        "first_available_on": snapshot_date,
+                        "vintage_date": snapshot_date,
+                    }
+                )
+            )
+        else:
+            visible.append(observation)
+    return derive_regime(visible, snapshot_date)
 
 
 def company_macro_sensitivity(values: dict[str, float | int | str | bool | None]) -> float:

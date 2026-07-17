@@ -41,6 +41,11 @@ class MacroObservation(BaseModel):
         """Compatibility alias for the first public availability date."""
         return self.first_available_on
 
+    @property
+    def point_in_time_available_on(self) -> date | None:
+        """Availability of this specific vintage, not merely the original release."""
+        return self.vintage_date or self.first_available_on
+
 
 class FedBalanceSheetRelease(BaseModel):
     release_date: date

@@ -5,7 +5,11 @@ import pytest
 
 from smct_research.core.models import FeatureSnapshot
 from smct_research.macro.models import MacroObservation
-from smct_research.macro.regime import company_macro_sensitivity, derive_regime
+from smct_research.macro.regime import (
+    company_macro_sensitivity,
+    derive_regime,
+    derive_regime_as_retrieved,
+)
 from smct_research.providers.base import ProviderConfigurationError
 from smct_research.providers.federal_reserve import FRED_SERIES, FederalReserveProvider
 from smct_research.signals.fed_regime import FederalReserveRegimeSignal
@@ -103,12 +107,55 @@ def test_alfred_requires_release_calendar_and_uses_it_for_historical_pit() -> No
     payload = {
         "observations": [{"date": "2024-01-01", "realtime_start": "2024-02-01", "value": "4.0"}]
     }
-    with pytest.raises(ValueError, match="original public availability"):
+    with pytest.raises(ValueError, match="complete vintage availability"):
         FederalReserveProvider.normalize_alfred(payload, "EFFR", availability_by_observation={})
     item = FederalReserveProvider.normalize_alfred(
         payload, "EFFR", availability_by_observation={date(2024, 1, 1): date(2024, 1, 2)}
     )[0]
     assert item.first_available_on == date(2024, 1, 2) and item.point_in_time_eligible
+
+
+def test_revised_alfred_vintage_is_not_visible_before_its_vintage_date() -> None:
+    availability = {date(2024, 1, 1): date(2024, 1, 2)}
+    initial = FederalReserveProvider.normalize_alfred(
+        {"observations": [{"date": "2024-01-01", "realtime_start": "2024-01-02", "value": "5.0"}]},
+        "EFFR",
+        availability_by_observation=availability,
+    )[0]
+    revised = FederalReserveProvider.normalize_alfred(
+        {"observations": [{"date": "2024-01-01", "realtime_start": "2024-02-01", "value": "5.2"}]},
+        "EFFR",
+        availability_by_observation=availability,
+    )[0]
+    assert revised.revision_status.value == "revised"
+    assert (
+        derive_regime([initial, revised], date(2024, 1, 15))["effective_federal_funds_rate"].value
+        == 5.0
+    )
+    assert (
+        derive_regime([initial, revised], date(2024, 2, 1))["effective_federal_funds_rate"].value
+        == 5.2
+    )
+
+
+def test_current_regime_as_retrieved_excludes_future_snapshot_values() -> None:
+    retrieved = datetime(2024, 2, 1, 12, tzinfo=UTC)
+    current = FederalReserveProvider.normalize_current_fred(
+        {"observations": [{"date": "2024-02-01", "realtime_start": "2024-02-01", "value": "5.25"}]},
+        "EFFR",
+        retrieved_at=retrieved,
+    )[0]
+    result = derive_regime_as_retrieved([current], retrieved)
+    assert result["effective_federal_funds_rate"].value == 5.25
+    future = current.model_copy(
+        update={"value": 9.0, "retrieved_at": datetime(2024, 2, 2, tzinfo=UTC)}
+    )
+    assert (
+        derive_regime_as_retrieved([current, future], retrieved)[
+            "effective_federal_funds_rate"
+        ].value
+        == 5.25
+    )
 
 
 def test_fred_cache_ttl_refreshes_and_preserves_snapshots(tmp_path: Path) -> None:
