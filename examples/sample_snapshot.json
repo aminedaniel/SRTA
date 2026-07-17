@@ -16,6 +16,12 @@
     "congress_latest_purchase_age_days": 28,
     "congress_median_disclosure_lag_days": 24,
     "congress_committee_relevance_score": 55,
-    "congress_repeat_buyer_score": 60
+    "congress_repeat_buyer_score": 60,
+    "renaissance_13f_status": "none",
+    "renaissance_13f_share_change_percent": 0,
+    "renaissance_13f_consecutive_quarters_held": 0,
+    "renaissance_13f_position_size_percentile": 0,
+    "renaissance_13f_disclosure_age_days": 0,
+    "renaissance_13f_lag_decay": 0
   }
 }

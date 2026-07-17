@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from smct_research.institutional_13f import (
+    Form13FHolding,
+    parse_amendment_type,
+    parse_information_table,
+)
 from smct_research.providers.base import (
     DataProvider,
     FixedRetryPolicy,
@@ -132,3 +138,92 @@ class SecEdgarProvider(DataProvider):
         if not isinstance(data, dict):
             raise ProviderResponseError(f"Cached SEC JSON must be an object: {path}")
         return data
+
+
+class Renaissance13FEdgarProvider(SecEdgarProvider):
+    """Download Renaissance Technologies' public 13F-HR/13F-HR/A information tables.
+
+    This adapter intentionally ingests only manager-level public EDGAR disclosures.
+    Callers supply a CUSIP-to-ticker mapping because EDGAR's 13F tables do not
+    reliably provide ticker symbols.
+    """
+
+    renaissance_cik = "0001037389"
+
+    def renaissance_13f_filings(self) -> list[dict[str, str]]:
+        """Return 13F records from both current and archived SEC submissions files."""
+        submission = self.submissions(self.renaissance_cik)
+        records = [submission.get("filings", {}).get("recent", {})]
+        for archived in submission.get("filings", {}).get("files", []):
+            name = archived.get("name")
+            if name:
+                records.append(self._get_json(f"submissions/{name}", f"submissions/{name}"))
+        filings: list[dict[str, str]] = []
+        for recent in records:
+            for form, accession, filing_date, document, report_date in zip(
+                recent.get("form", []),
+                recent.get("accessionNumber", []),
+                recent.get("filingDate", []),
+                recent.get("primaryDocument", []),
+                recent.get("reportDate", []),
+                strict=True,
+            ):
+                if form in {"13F-HR", "13F-HR/A"}:
+                    filings.append(
+                        {
+                            "form": form,
+                            "accession_number": accession,
+                            "filing_date": filing_date,
+                            "primary_document": document,
+                            "reporting_quarter": report_date,
+                        }
+                    )
+        return sorted(filings, key=lambda filing: filing["filing_date"])
+
+    def renaissance_13f_holdings(
+        self, ticker_for_cusip: Callable[[str], str | None] | None = None
+    ) -> list[Form13FHolding]:
+        """Fetch each filing's actual information table, not merely its cover page."""
+        holdings: list[Form13FHolding] = []
+        for filing in self.renaissance_13f_filings():
+            cover = self.filing_document(filing["accession_number"], filing["primary_document"])
+            amendment_type = parse_amendment_type(filing["form"], cover)
+            index = json.loads(self.filing_document(filing["accession_number"], "index.json"))
+            items = index.get("directory", {}).get("item", [])
+            candidates = [
+                item.get("name", "")
+                for item in items
+                if item.get("name", "").lower().endswith(".xml")
+                and item.get("name") != filing["primary_document"]
+            ]
+            for document in candidates:
+                rows = parse_information_table(
+                    self.filing_document(filing["accession_number"], document),
+                    reporting_quarter=date.fromisoformat(filing["reporting_quarter"]),
+                    filing_date=date.fromisoformat(filing["filing_date"]),
+                    accession_number=filing["accession_number"],
+                    amendment_type=amendment_type,
+                    ticker_for_cusip=ticker_for_cusip,
+                )
+                if rows:
+                    holdings.extend(rows)
+                    break
+        return holdings
+
+    def filing_document(self, accession_number: str, document_name: str) -> bytes:
+        accession = accession_number.replace("-", "")
+        cache_path = self.cache_dir / "13f" / accession / document_name
+        if cache_path.exists():
+            return cache_path.read_bytes()
+
+        def download() -> bytes:
+            self.rate_limiter.acquire()
+            url = f"https://www.sec.gov/Archives/edgar/data/{int(self.renaissance_cik)}/{accession}/{document_name}"
+            payload = self.transport(
+                url, {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+            )
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(payload)
+            return payload
+
+        return self.retry_policy.run(download)

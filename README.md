@@ -12,6 +12,7 @@ The initial implementation includes:
 - valuation-compression signal
 - Reddit awareness/crowding signal
 - congressional disclosed-purchasing signal
+- Renaissance Public Equity Activity (delayed SEC Form 13F corroboration)
 - composite research-priority scorer
 - CLI and tests
 

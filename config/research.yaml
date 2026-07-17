@@ -12,6 +12,7 @@ scoring:
   alternative_data: 0.10
   insider_alignment: 0.10
   congressional_alignment: 0.05
+  renaissance_public_equity_activity: 0.25
   crowding_risk: -0.05
 
 research:
