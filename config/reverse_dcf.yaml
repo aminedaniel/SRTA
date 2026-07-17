@@ -1,0 +1,5 @@
+# Override these transparent scenario assumptions in an input file or calling workflow.
+# Rates and margins are decimals. Forecast years must be between 5 and 10.
+conservative: {initial_revenue_growth: 0.08, terminal_revenue_growth: 0.03, terminal_fcf_margin: 0.15, discount_rate: 0.12, terminal_growth_rate: 0.025, annual_dilution: 0.02, explicit_forecast_years: 7}
+base: {initial_revenue_growth: 0.15, terminal_revenue_growth: 0.04, terminal_fcf_margin: 0.22, discount_rate: 0.10, terminal_growth_rate: 0.025, annual_dilution: 0.015, explicit_forecast_years: 7}
+optimistic: {initial_revenue_growth: 0.22, terminal_revenue_growth: 0.05, terminal_fcf_margin: 0.28, discount_rate: 0.09, terminal_growth_rate: 0.03, annual_dilution: 0.01, explicit_forecast_years: 7}

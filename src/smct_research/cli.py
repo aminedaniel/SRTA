@@ -17,7 +17,15 @@ from smct_research.signals.fed_regime import FederalReserveRegimeSignal
 from smct_research.signals.form4_cluster_buying import Form4ClusterBuyingSignal
 from smct_research.signals.reddit_awareness import RedditAwarenessSignal
 from smct_research.signals.renaissance_public_equity import RenaissancePublicEquityActivitySignal
+from smct_research.signals.reverse_dcf_expectations import ReverseDCFExpectationsSignal
 from smct_research.signals.valuation_compression import ValuationCompressionSignal
+from smct_research.valuation.reverse_dcf import (
+    DCFScenario,
+    ReverseDCFInputs,
+    sensitivity,
+    solve_reverse_dcf,
+    value_dcf,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -25,6 +33,7 @@ app = typer.Typer(no_args_is_help=True)
 def default_registry() -> SignalRegistry:
     registry = SignalRegistry()
     registry.register(ValuationCompressionSignal())
+    registry.register(ReverseDCFExpectationsSignal())
     registry.register(RedditAwarenessSignal())
     registry.register(CongressionalPurchaseSignal())
     registry.register(Form4ClusterBuyingSignal())
@@ -80,7 +89,7 @@ def screen(
     output_json: Path | None = typer.Option(None),  # noqa: B008
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     include_ineligible: bool = typer.Option(False),
-    config: Path | None = typer.Option(None),  # noqa: B008
+    config: Path | None = typer.Option(None),  # noqa: B008  # noqa: B008
 ) -> None:
     """Rank an offline universe using one JSON feature snapshot per ticker."""
     policy_data: dict[str, object] = {}
@@ -124,3 +133,64 @@ def screen(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def dcf(
+    input_file: Path,
+    as_of: str | None = typer.Option(None),
+    config: Path | None = typer.Option(None),  # noqa: B008
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+    sensitivity_output: bool = typer.Option(False, "--sensitivity"),
+    scenario: str = typer.Option("all"),
+) -> None:
+    """Run an offline deterministic scenario and reverse-DCF valuation."""
+    del config  # Input is self-contained; configuration may be merged by callers.
+    payload = json.loads(input_file.read_text())
+    inputs = ReverseDCFInputs.model_validate(payload.get("inputs", payload))
+    if as_of:
+        inputs.valuation_date = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    scenarios = [DCFScenario.model_validate(item) for item in payload.get("scenarios", [])]
+    if not scenarios:
+        raise typer.BadParameter("input must include scenarios")
+    selected = (
+        scenarios if scenario == "all" else [item for item in scenarios if item.name == scenario]
+    )
+    if not selected:
+        raise typer.BadParameter("--scenario must match an input scenario")
+    output = []
+    for item in selected:
+        valuation = value_dcf(inputs, item)
+        record: dict[str, object] = {
+            "valuation": valuation.model_dump(mode="json"),
+            "reverse": solve_reverse_dcf(inputs, item).model_dump(mode="json"),
+        }
+        if sensitivity_output:
+            record["sensitivity"] = [
+                x.model_dump(mode="json")
+                for x in sensitivity(
+                    inputs,
+                    item,
+                    [item.discount_rate - 0.01, item.discount_rate, item.discount_rate + 0.01],
+                    [
+                        item.terminal_growth_rate - 0.005,
+                        item.terminal_growth_rate,
+                        item.terminal_growth_rate + 0.005,
+                    ],
+                    [
+                        item.terminal_fcf_margin - 0.05,
+                        item.terminal_fcf_margin,
+                        item.terminal_fcf_margin + 0.05,
+                    ],
+                    [
+                        item.initial_revenue_growth - 0.05,
+                        item.initial_revenue_growth,
+                        item.initial_revenue_growth + 0.05,
+                    ],
+                )
+            ]
+        output.append(record)
+    rendered = json.dumps(output, indent=2)
+    if output_json:
+        output_json.write_text(rendered + "\n")
+    typer.echo(rendered)
