@@ -145,3 +145,43 @@ def test_regime_signal_is_bounded_research_context() -> None:
     result = FederalReserveRegimeSignal().evaluate(snapshot)
     assert -15 <= result.score <= 15
     assert "not trade instructions" in result.risks[0]
+
+
+def test_liquidity_thresholds_and_emergency_classification_are_explicit() -> None:
+    stable = [
+        obs("WALCL", "2024-01-01", 8000, unit="millions_usd"),
+        obs("WALCL", "2024-04-01", 8039, unit="millions_usd"),
+    ]
+    emergency = [
+        *stable,
+        obs("H41_EMERGENCY", "2024-04-01", 1, unit="millions_usd"),
+    ]
+    assert derive_regime(stable, date(2024, 4, 1))["liquidity_regime"].value == "stable"
+    assert (
+        derive_regime(emergency, date(2024, 4, 1))["liquidity_regime"].value
+        == "emergency_liquidity"
+    )
+
+
+def test_fred_normalization_requires_a_public_availability_date() -> None:
+    payload = {"observations": [{"date": "2024-01-01", "value": "5.0"}]}
+    with pytest.raises(ValueError, match="lacks public availability"):
+        FederalReserveProvider.normalize_fred(payload, "EFFR")
+
+
+def test_series_registry_covers_spreads_and_daily_reverse_repo_data() -> None:
+    from smct_research.providers.federal_reserve import FRED_SERIES
+
+    assert FRED_SERIES["T10Y2Y"].unit == "percentage_points"
+    assert FRED_SERIES["RRPONTSYD"].frequency == "daily"
+
+
+def test_uncached_fred_requires_contact_email_in_user_agent(tmp_path: Path) -> None:
+    provider = FederalReserveProvider(
+        tmp_path,
+        api_key="key",
+        user_agent="SMCT Research",
+        transport=lambda u, h: b"{}",
+    )
+    with pytest.raises(ProviderConfigurationError, match="contact email"):
+        provider.fred_series("EFFR")

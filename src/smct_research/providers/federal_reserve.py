@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -46,11 +47,14 @@ FRED_SERIES: dict[str, SeriesDefinition] = {
     "DGS3MO": _series("percent", "daily", "U.S. Treasury", True),
     "WALCL": _series("millions_usd", "weekly", "Federal Reserve H.4.1", True),
     "WRESBAL": _series("millions_usd", "weekly", "Federal Reserve H.4.1", True),
-    "RRPONTSYD": _series("billions_usd", "weekly", "Federal Reserve Bank of New York", True),
+    "RRPONTSYD": _series("billions_usd", "daily", "Federal Reserve Bank of New York", True),
     "T10Y2Y": _series("percentage_points", "daily", "U.S. Treasury", True),
     "T10Y3M": _series("percentage_points", "daily", "U.S. Treasury", True),
     "H41_EMERGENCY": _series("millions_usd", "weekly", "Federal Reserve H.4.1", True),
 }
+
+
+USER_AGENT_EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 def _date_field(item: dict[str, Any], *names: str) -> date | None:
@@ -109,15 +113,16 @@ class FederalReserveProvider(DataProvider):
             raise ProviderConfigurationError(
                 "FRED_API_KEY must be supplied for uncached FRED requests"
             )
+        user_agent = self.user_agent.strip() if self.user_agent else ""
         if (
-            not self.user_agent
-            or "contact@example.com" in self.user_agent
-            or len(self.user_agent.strip()) < 8
+            "contact@example.com" in user_agent
+            or len(user_agent) < 8
+            or not USER_AGENT_EMAIL_PATTERN.search(user_agent)
         ):
             raise ProviderConfigurationError(
-                "FRED_USER_AGENT must identify this application before uncached FRED requests"
+                "FRED_USER_AGENT must identify the application and include a contact email "
+                "before uncached FRED requests"
             )
-        user_agent = self.user_agent
         query = urlencode({**params, "api_key": self.api_key, "file_type": "json"})
 
         def download() -> dict[str, Any]:
