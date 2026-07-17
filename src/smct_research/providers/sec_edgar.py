@@ -132,3 +132,53 @@ class SecEdgarProvider(DataProvider):
         if not isinstance(data, dict):
             raise ProviderResponseError(f"Cached SEC JSON must be an object: {path}")
         return data
+
+
+class Renaissance13FEdgarProvider(SecEdgarProvider):
+    """Download Renaissance Technologies' public 13F-HR/13F-HR/A information tables.
+
+    This adapter intentionally ingests only manager-level public EDGAR disclosures.
+    Callers supply a CUSIP-to-ticker mapping because EDGAR's 13F tables do not
+    reliably provide ticker symbols.
+    """
+
+    renaissance_cik = "0001037389"
+
+    def renaissance_13f_filings(self) -> list[dict[str, str]]:
+        recent = self.submissions(self.renaissance_cik).get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        accessions = recent.get("accessionNumber", [])
+        dates = recent.get("filingDate", [])
+        documents = recent.get("primaryDocument", [])
+        filings: list[dict[str, str]] = []
+        for form, accession, filing_date, document in zip(
+            forms, accessions, dates, documents, strict=True
+        ):
+            if form in {"13F-HR", "13F-HR/A"}:
+                filings.append(
+                    {
+                        "form": form,
+                        "accession_number": accession,
+                        "filing_date": filing_date,
+                        "primary_document": document,
+                    }
+                )
+        return filings
+
+    def filing_document(self, accession_number: str, document_name: str) -> bytes:
+        accession = accession_number.replace("-", "")
+        cache_path = self.cache_dir / "13f" / accession / document_name
+        if cache_path.exists():
+            return cache_path.read_bytes()
+
+        def download() -> bytes:
+            self.rate_limiter.acquire()
+            url = f"https://www.sec.gov/Archives/edgar/data/{int(self.renaissance_cik)}/{accession}/{document_name}"
+            payload = self.transport(
+                url, {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+            )
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(payload)
+            return payload
+
+        return self.retry_policy.run(download)

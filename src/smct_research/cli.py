@@ -11,6 +11,7 @@ from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.signals.congressional_purchases import CongressionalPurchaseSignal
 from smct_research.signals.fed_regime import FederalReserveRegimeSignal
 from smct_research.signals.reddit_awareness import RedditAwarenessSignal
+from smct_research.signals.renaissance_public_equity import RenaissancePublicEquityActivitySignal
 from smct_research.signals.valuation_compression import ValuationCompressionSignal
 
 app = typer.Typer(no_args_is_help=True)
@@ -22,6 +23,7 @@ def default_registry() -> SignalRegistry:
     registry.register(RedditAwarenessSignal())
     registry.register(CongressionalPurchaseSignal())
     registry.register(FederalReserveRegimeSignal())
+    registry.register(RenaissancePublicEquityActivitySignal())
     return registry
 
 
