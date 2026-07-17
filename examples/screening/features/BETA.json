@@ -1,0 +1,16 @@
+{
+  "as_of": "2026-07-01T00:00:00Z",
+  "sources": {
+    "financials": "offline fixture"
+  },
+  "source_as_of": {
+    "financials": "2026-06-30T00:00:00Z"
+  },
+  "ticker": "BETA",
+  "values": {
+    "ev_sales_current": 3,
+    "ev_sales_3y_median": 8,
+    "revenue_growth_current": 0.3,
+    "revenue_growth_3y_median": 0.35
+  }
+}

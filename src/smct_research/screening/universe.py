@@ -23,16 +23,58 @@ class UniversePolicy(BaseModel):
             "electronic",
         }
     )
+    allowed_exchanges: set[str] = Field(default_factory=lambda: {"NASDAQ", "NYSE", "NYSEAMERICAN"})
+    eligible_security_types: set[str] = Field(default_factory=lambda: {"common_equity"})
+    security_type_aliases: dict[str, str] = Field(
+        default_factory=lambda: {
+            "common": "common_equity",
+            "common stock": "common_equity",
+            "common_stock": "common_equity",
+            "ordinary share": "common_equity",
+            "ordinary_shares": "common_equity",
+        }
+    )
+
+    def exclusion_reasons(self, company: Company) -> list[str]:
+        """Return every reason a company cannot enter the screened universe."""
+        reasons: list[str] = []
+        if company.is_active is None:
+            reasons.append("unknown_active_status")
+        elif not company.is_active:
+            reasons.append("inactive_security")
+        if not company.country:
+            reasons.append("unknown_country")
+        elif company.country.upper() not in self.countries:
+            reasons.append("not_us_listed")
+        if not company.exchange or company.exchange.upper() not in self.allowed_exchanges:
+            reasons.append(
+                "unknown_exchange" if not company.exchange else "unsupported_or_otc_exchange"
+            )
+        if not company.security_type:
+            reasons.append("unknown_security_type")
+        elif (
+            self._normalized_security_type(company.security_type)
+            not in self.eligible_security_types
+        ):
+            reasons.append(
+                f"unsupported_security_type:{self._normalized_security_type(company.security_type)}"
+            )
+        if company.market_cap_usd < self.minimum_market_cap_usd:
+            reasons.append("market_cap_below_minimum")
+        if company.market_cap_usd > self.maximum_market_cap_usd:
+            reasons.append("market_cap_above_maximum")
+        if company.average_daily_dollar_volume is None:
+            reasons.append("missing_average_daily_dollar_volume")
+        elif company.average_daily_dollar_volume < self.minimum_daily_dollar_volume:
+            reasons.append("average_daily_dollar_volume_below_minimum")
+        text = f"{company.sector} {company.industry or ''}".lower()
+        if not any(keyword in text for keyword in self.technology_keywords):
+            reasons.append("outside_technology_focus")
+        return reasons
 
     def includes(self, company: Company) -> bool:
-        if not company.is_active or company.country not in self.countries:
-            return False
-        if not self.minimum_market_cap_usd <= company.market_cap_usd <= self.maximum_market_cap_usd:
-            return False
-        if (
-            company.average_daily_dollar_volume is not None
-            and company.average_daily_dollar_volume < self.minimum_daily_dollar_volume
-        ):
-            return False
-        text = f"{company.sector} {company.industry or ''}".lower()
-        return any(keyword in text for keyword in self.technology_keywords)
+        return not self.exclusion_reasons(company)
+
+    def _normalized_security_type(self, value: str) -> str:
+        normalized = " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+        return self.security_type_aliases.get(normalized, normalized.replace(" ", "_"))

@@ -46,3 +46,19 @@ purchases (transaction code `P`, acquired shares, positive share count and price
 the filing date as its point-in-time availability boundary. It deduplicates amended transactions
 and uses insider purchase clusters only as **corroborating research evidence—not standalone trade
 instructions**.
+
+## Ranked discovery screen
+
+The offline screening workflow reads a canonical JSON or CSV universe and one normalized
+feature-snapshot JSON file per ticker. It never lets signals fetch data directly. Run the included
+six-company fixture (including a deliberately ineligible ETF) with:
+
+```bash
+smct screen examples/screening/universe.json examples/screening/features \
+  --as-of 2026-07-17T00:00:00Z --include-ineligible \
+  --output-json ranked-results.json --output-csv ranked-results.csv
+```
+
+Scores normalize only across signals with all required evidence. The output separately reports
+unavailable signals, feature completeness, stale evidence, and point-in-time warnings; absence of
+evidence is never converted into a neutral signal score.

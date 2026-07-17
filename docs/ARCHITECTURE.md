@@ -37,3 +37,14 @@ Identify underfollowed or mispriced U.S.-listed small- and mid-cap technology co
 - High-frequency scheduling
 
 These may be added later as optional downstream capabilities, but they do not drive the core design.
+
+## Ranked discovery workflow
+
+`smct screen` is the batch boundary for research discovery. A universe reader creates canonical
+company entries, `UniversePolicy` retains every eligibility exclusion reason, and the feature
+assembly layer turns normalized provider evidence into point-in-time `FeatureSnapshot` objects.
+Signals receive only a snapshot and therefore cannot make external API calls. The batch service
+evaluates every registered signal whose required fields are present, then normalizes the composite
+score over evaluated signals only. It orders equal scores by ticker, emits coverage and stale-data
+diagnostics, and can write terminal, JSON, and flat CSV representations. See the local command in
+the README and `examples/screening/` for a reproducible offline example.

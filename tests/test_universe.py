@@ -9,6 +9,10 @@ def test_includes_liquid_small_cap_software_company() -> None:
         market_cap_usd=2_000_000_000,
         sector="Technology",
         industry="Application Software",
+        exchange="NASDAQ",
+        country="US",
+        security_type="common_equity",
+        is_active=True,
         average_daily_dollar_volume=5_000_000,
     )
     assert UniversePolicy().includes(company)
@@ -20,6 +24,10 @@ def test_excludes_large_cap() -> None:
         name="Mega Tech",
         market_cap_usd=200_000_000_000,
         sector="Technology",
+        exchange="NASDAQ",
+        country="US",
+        security_type="common_equity",
+        is_active=True,
         average_daily_dollar_volume=50_000_000,
     )
     assert not UniversePolicy().includes(company)

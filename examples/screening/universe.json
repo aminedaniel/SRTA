@@ -1,0 +1,80 @@
+[
+  {
+    "ticker": "ALPH",
+    "company name": "Alpha Systems",
+    "CIK": "1000001",
+    "exchange": "NASDAQ",
+    "sector": "Technology",
+    "industry": "Application Software",
+    "market capitalization": 2500000000,
+    "average daily dollar volume": 9000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
+    "ticker": "BETA",
+    "company name": "Beta Cloud",
+    "CIK": "1000002",
+    "exchange": "NYSE",
+    "sector": "Technology",
+    "industry": "Software",
+    "market capitalization": 1600000000,
+    "average daily dollar volume": 6000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
+    "ticker": "CLST",
+    "company name": "Cluster Devices",
+    "CIK": "1000003",
+    "exchange": "NASDAQ",
+    "sector": "Technology",
+    "industry": "Semiconductors",
+    "market capitalization": 900000000,
+    "average daily dollar volume": 4000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
+    "ticker": "NEUT",
+    "company name": "Neutral Networks",
+    "CIK": "1000004",
+    "exchange": "NYSE",
+    "sector": "Technology",
+    "industry": "Communications Equipment",
+    "market capitalization": 1200000000,
+    "average daily dollar volume": 5000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
+    "ticker": "MISS",
+    "company name": "Missing Evidence Inc.",
+    "CIK": "1000005",
+    "exchange": "NASDAQ",
+    "sector": "Technology",
+    "industry": "Software",
+    "market capitalization": 700000000,
+    "average daily dollar volume": 3000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
+    "ticker": "FUND",
+    "company name": "Fund Example",
+    "CIK": "1000006",
+    "exchange": "NYSE",
+    "sector": "Technology",
+    "industry": "Fund",
+    "market capitalization": 1000000000,
+    "average daily dollar volume": 5000000,
+    "active/inactive status": "active",
+    "security_type": "etf",
+    "country": "US"
+  }
+]
