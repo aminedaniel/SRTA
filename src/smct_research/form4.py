@@ -225,48 +225,41 @@ def parse_form4_filing(
 def deduplicate_form4_transactions(
     rows: list[Form4Transaction], as_of: date, filings: list[Form4Filing] | None = None
 ) -> list[Form4Transaction]:
-    """Apply public-date and filing-level Form 4/A replacement semantics.
+    """Retain purchases from the latest visible filing for each reporting key.
 
-    A visible amendment replaces every transaction from earlier filings for the
-    same issuer, reporting owner, and report date; then duplicate table rows are
-    collapsed at the underlying purchase-event level.
+    The latest filing is chosen by filing date then accession number for each
+    issuer/reporting-owner-CIK/report-date key.  Filing metadata is considered
+    even when an amendment has no qualifying purchase rows, allowing a later
+    nonqualifying Form 4/A to remove all earlier purchase evidence.
     """
     visible = [row for row in rows if row.filing_date <= as_of and row.is_qualifying_purchase]
-    amendment_keys = {
-        key
-        for filing in filings or []
-        if filing.is_amendment and filing.filing_date <= as_of
-        for key in [filing.amendment_filing_key]
-        if key is not None
-    }
-    amendments: dict[tuple[str, str, date], Form4Transaction] = {}
+    latest_accession: dict[tuple[str, str, date], tuple[date, str]] = {}
+
+    def consider(key: tuple[str, str, date] | None, filed: date, accession: str) -> None:
+        if key is None:
+            return
+        current = latest_accession.get(key)
+        candidate = (filed, accession)
+        if current is None or candidate > current:
+            latest_accession[key] = candidate
+
+    # Rows provide fallback metadata for callers that only hold transactions.
     for row in visible:
-        if row.is_amendment:
-            amendment_keys.add(row.amendment_filing_key)
-            prior = amendments.get(row.amendment_filing_key)
-            if prior is None or (row.filing_date, row.accession_number) > (
-                prior.filing_date,
-                prior.accession_number,
-            ):
-                amendments[row.amendment_filing_key] = row
-    replaced = [
+        consider(row.amendment_filing_key, row.filing_date, row.accession_number)
+    for filing in filings or []:
+        if filing.filing_date <= as_of:
+            consider(filing.amendment_filing_key, filing.filing_date, filing.accession_number)
+
+    retained = [
         row
         for row in visible
-        if (
-            row.amendment_filing_key not in amendment_keys
-            and row.amendment_filing_key not in amendments
-        )
-        or (
-            row.is_amendment
-            and row.accession_number == amendments[row.amendment_filing_key].accession_number
-        )
+        if latest_accession.get(row.amendment_filing_key) == (row.filing_date, row.accession_number)
     ]
     latest: dict[tuple[str, str, date, str, float, float], Form4Transaction] = {}
-    for row in replaced:
+    for row in retained:
         old = latest.get(row.purchase_event_key)
-        if old is None or (row.filing_date, row.is_amendment, row.accession_number) > (
+        if old is None or (row.filing_date, row.accession_number) > (
             old.filing_date,
-            old.is_amendment,
             old.accession_number,
         ):
             latest[row.purchase_event_key] = row

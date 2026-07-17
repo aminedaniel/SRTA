@@ -153,3 +153,28 @@ def test_identity_and_score_inputs_are_limited_to_triggered_cluster() -> None:
     assert features["form4_unique_insiders_buying_7d"] == 3
     assert features["form4_aggregate_purchase_value_7d"] == 150_000
     assert features["form4_largest_individual_purchase_7d"] == 50_000
+
+
+def test_latest_nonqualifying_amendment_removes_prior_qualifying_amendment() -> None:
+    payload = Path("tests/fixtures/sec/form4_purchase.xml").read_bytes()
+    original = parse_form4_filing(payload, filing_date=date(2026, 7, 11), accession_number="001")
+    qualifying_amendment = parse_form4_filing(
+        payload, filing_date=date(2026, 7, 12), accession_number="002", is_amendment=True
+    )
+    nonqualifying_amendment = parse_form4_filing(
+        payload.replace(
+            b"<transactionCode>P</transactionCode>", b"<transactionCode>A</transactionCode>"
+        ),
+        filing_date=date(2026, 7, 13),
+        accession_number="003",
+        is_amendment=True,
+    )
+    assert qualifying_amendment.transactions and not nonqualifying_amendment.transactions
+    assert (
+        deduplicate_form4_transactions(
+            original.transactions + qualifying_amendment.transactions,
+            date(2026, 7, 13),
+            [original, qualifying_amendment, nonqualifying_amendment],
+        )
+        == []
+    )
