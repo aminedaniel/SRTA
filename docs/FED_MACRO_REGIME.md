@@ -6,7 +6,7 @@ This module is a bounded research-context modifier—not a buy, sell, or executi
 
 The typed registry records each series' unit, frequency, release source, and revision behavior. It includes percent rates (EFFR and Treasury yields), CPI's `index_1982_84_100`, balance-sheet values in millions/billions USD (including daily RRPONTSYD), and percentage-point spread series. Normalization preserves that metadata.
 
-Each observation separately records its observation date, release/publication date, first public availability date, vintage date, and retrieval timestamp. Historical calculations include an observation only on or after `first_available_on`; for FRED/ALFRED this is the first `realtime_start` vintage. Observation dates are never assumed to be release dates. Revised values consequently cannot appear in an earlier historical evaluation.
+Current FRED values are explicitly marked ineligible for historical point-in-time evaluation: their `realtime_start` describes the response vintage, not an observation release date. Historical values must be normalized from ALFRED together with a complete release-calendar mapping that supplies each observation's original public availability date. Each point-in-time observation separately records observation, publication, availability, vintage, and retrieval dates; values without established availability are never used in historical calculations. Cached current and ALFRED payloads support configurable TTLs, explicit refresh, and immutable timestamped raw snapshots.
 
 ## Classification thresholds
 

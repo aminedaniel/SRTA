@@ -24,8 +24,8 @@ class SeriesDefinition(BaseModel, frozen=True):
 class MacroObservation(BaseModel):
     series_id: str
     observation_date: date
-    publication_date: date
-    first_available_on: date
+    publication_date: date | None
+    first_available_on: date | None
     vintage_date: date | None = None
     retrieved_at: datetime
     value: float
@@ -34,9 +34,10 @@ class MacroObservation(BaseModel):
     revision_status: RevisionStatus = RevisionStatus.UNKNOWN
     frequency: str
     provenance_url: str
+    point_in_time_eligible: bool = True
 
     @property
-    def available_on(self) -> date:
+    def available_on(self) -> date | None:
         """Compatibility alias for the first public availability date."""
         return self.first_available_on
 

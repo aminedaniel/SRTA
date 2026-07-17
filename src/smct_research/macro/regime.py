@@ -12,7 +12,13 @@ POLICY_MATERIALITY_THRESHOLD_PCT = 0.10
 
 def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str, MacroFeature]:
     """Derive only from values that were public by ``as_of``; missing inputs stay unknown."""
-    usable = [o for o in observations if o.first_available_on <= as_of]
+    usable = [
+        o
+        for o in observations
+        if o.point_in_time_eligible
+        and o.first_available_on is not None
+        and o.first_available_on <= as_of
+    ]
     by_id: dict[str, list[MacroObservation]] = {}
     for item in usable:
         by_id.setdefault(item.series_id, []).append(item)
@@ -31,12 +37,13 @@ def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str
 
     def put(name: str, value: float | str | None, *series: str) -> None:
         sources = [latest(series_id) for series_id in series]
-        dates = [item.first_available_on for item in sources if item is not None]
+        dates = [item.first_available_on for item in sources if item and item.first_available_on]
+        complete = len(dates) == len(series) and value is not None
         output[name] = MacroFeature(
             name=name,
             value=value,
             available_on=max(dates, default=as_of),
-            quality_score=len(dates) / len(series) if series else 0,
+            quality_score=1.0 if complete else 0.0,
             source_series=list(series),
         )
 
@@ -89,7 +96,11 @@ def derive_regime(observations: list[MacroObservation], as_of: date) -> dict[str
         liquidity = "contraction"
     else:
         liquidity = "stable"
-    put("liquidity_regime", liquidity, "WALCL", "H41_EMERGENCY")
+    put(
+        "liquidity_regime",
+        liquidity,
+        *("H41_EMERGENCY",) if emergency and emergency.value > 0 else ("WALCL",),
+    )
 
     policy_change = output["policy_rate_change_6m"].value
     if policy_change is None:
@@ -161,4 +172,26 @@ def _percentage_change(
 def _year_over_year_percent(
     items: list[MacroObservation], current: MacroObservation | None
 ) -> float | None:
-    return _percentage_change(items, current, 330)
+    """Use the same calendar month a year earlier, allowing only a 7-day date offset."""
+    if current is None:
+        return None
+    target = date(current.observation_date.year - 1, current.observation_date.month, 1)
+    same_month = [
+        item
+        for item in items
+        if item.observation_date.year == target.year
+        and item.observation_date.month == target.month
+        and item.value != 0
+    ]
+    if same_month:
+        prior = min(same_month, key=lambda item: abs((item.observation_date - target).days))
+    else:
+        nearby = [
+            item
+            for item in items
+            if item.value != 0 and abs((item.observation_date - target).days) <= 7
+        ]
+        if not nearby:
+            return None
+        prior = min(nearby, key=lambda item: abs((item.observation_date - target).days))
+    return (current.value / prior.value - 1) * 100

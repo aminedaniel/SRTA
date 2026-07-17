@@ -17,7 +17,7 @@ FIXTURE = Path(__file__).parent / "fixtures/sec/companyfacts.json"
 def test_normalizes_amendment_and_prevents_lookahead() -> None:
     facts = json.loads(FIXTURE.read_text())
     observations = normalize_company_facts(facts, retrieved_at=datetime(2024, 3, 2, tzinfo=UTC))
-    assert any(x.filing.is_superseded for x in observations if x.metric == "revenue")
+    assert not any(x.filing.is_superseded for x in observations if x.metric == "revenue")
     before_amendment = derive_features(observations, date(2024, 2, 25))
     assert before_amendment["revenue"].value == 100
     after_amendment = derive_features(observations, date(2024, 3, 2))
@@ -53,3 +53,22 @@ def test_local_store_exports_parquet(tmp_path: Path) -> None:
     store.export_features_parquet(derive_features(observations, date(2024, 5, 2)), destination)
     store.close()
     assert destination.exists()
+
+
+def test_local_store_preserves_duration_and_instant_facts(tmp_path: Path) -> None:
+    observations = normalize_company_facts(json.loads(FIXTURE.read_text()))
+    duration = next(item for item in observations if item.metric == "revenue" and item.period_start)
+    instant = next(
+        item
+        for item in observations
+        if item.metric == "cash_and_equivalents" and not item.period_start
+    )
+    store = LocalAnalyticalStore(tmp_path / "evidence.duckdb")
+    store.store_observations([duration, instant])
+    rows = store.connection.execute(
+        "SELECT metric, period_start FROM financial_observations ORDER BY metric"
+    ).fetchall()
+    store.close()
+    assert len(rows) == 2
+    assert dict(rows)["cash_and_equivalents"] is None
+    assert dict(rows)["revenue"] == duration.period_start

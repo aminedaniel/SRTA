@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import Path
@@ -26,11 +27,11 @@ class LocalAnalyticalStore:
             payload_json VARCHAR, PRIMARY KEY(provider, document_id))""")
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS financial_observations ("
-            "accession_number VARCHAR, metric VARCHAR, value DOUBLE, unit VARCHAR, "
+            "observation_id VARCHAR PRIMARY KEY, accession_number VARCHAR, metric VARCHAR, "
+            "value DOUBLE, unit VARCHAR, "
             "currency VARCHAR, period_type VARCHAR, period_start DATE, period_end DATE, "
             "fiscal_year INTEGER, fiscal_period VARCHAR, filed_at DATE, available_on DATE, "
-            "is_amendment BOOLEAN, is_superseded BOOLEAN, provenance_json VARCHAR, "
-            "PRIMARY KEY(accession_number, metric, unit, period_end, period_start))"
+            "is_amendment BOOLEAN, is_superseded BOOLEAN, provenance_json VARCHAR)"
         )
 
     def close(self) -> None:
@@ -53,8 +54,9 @@ class LocalAnalyticalStore:
         for item in observations:
             self.connection.execute(
                 "INSERT OR IGNORE INTO financial_observations "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
+                    self._observation_id(item),
                     item.filing.accession_number,
                     item.metric,
                     item.value,
@@ -72,6 +74,21 @@ class LocalAnalyticalStore:
                     item.provenance.model_dump_json(),
                 ],
             )
+
+    @staticmethod
+    def _observation_id(item: FinancialObservation) -> str:
+        identity = "|".join(
+            str(value)
+            for value in (
+                item.filing.accession_number,
+                item.metric,
+                item.unit,
+                item.period_start,
+                item.period_end,
+                item.value,
+            )
+        )
+        return hashlib.sha256(identity.encode()).hexdigest()
 
     def export_features_parquet(self, features: dict[str, FeatureValue], path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-"""FRED/ALFRED and H.4.1 adapters; all I/O stays outside research signals."""
+"""Current FRED and point-in-time ALFRED adapters with durable raw-cache snapshots."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import hashlib
 import json
 import os
 import re
-from datetime import UTC, date, datetime
+from collections.abc import Mapping
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -52,12 +53,10 @@ FRED_SERIES: dict[str, SeriesDefinition] = {
     "T10Y3M": _series("percentage_points", "daily", "U.S. Treasury", True),
     "H41_EMERGENCY": _series("millions_usd", "weekly", "Federal Reserve H.4.1", True),
 }
-
-
 USER_AGENT_EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
-def _date_field(item: dict[str, Any], *names: str) -> date | None:
+def _date_field(item: Mapping[str, Any], *names: str) -> date | None:
     for name in names:
         if item.get(name):
             return datetime.fromisoformat(str(item[name])).date()
@@ -73,6 +72,7 @@ class FederalReserveProvider(DataProvider):
         api_key: str | None = None,
         *,
         user_agent: str | None = None,
+        cache_ttl: timedelta | None = None,
         base_url: str = "https://api.stlouisfed.org",
         rate_limiter: RateLimiter | None = None,
         retry_policy: RetryPolicy | None = None,
@@ -83,7 +83,7 @@ class FederalReserveProvider(DataProvider):
             api_key or os.getenv("FRED_API_KEY"),
             base_url.rstrip("/"),
         )
-        self.user_agent = user_agent or os.getenv("FRED_USER_AGENT")
+        self.user_agent, self.cache_ttl = user_agent or os.getenv("FRED_USER_AGENT"), cache_ttl
         self.rate_limiter, self.retry_policy, self.transport = (
             rate_limiter or ConservativeRateLimiter(),
             retry_policy or FixedRetryPolicy(),
@@ -93,22 +93,40 @@ class FederalReserveProvider(DataProvider):
     def fetch(self, identifier: str) -> dict[str, Any]:
         return self.fred_series(identifier)
 
-    def fred_series(self, series_id: str) -> dict[str, Any]:
+    def fred_series(self, series_id: str, *, refresh: bool = False) -> dict[str, Any]:
+        """Fetch current values only; use ``alfred_series`` for historical PIT research."""
         return self._json(
-            "fred/series/observations", {"series_id": series_id}, f"fred/{series_id}.json"
+            "fred/series/observations",
+            {"series_id": series_id},
+            f"fred/{series_id}.json",
+            refresh=refresh,
         )
 
-    def alfred_series(self, series_id: str, vintage_date: str) -> dict[str, Any]:
+    def alfred_series(
+        self, series_id: str, vintage_date: str, *, refresh: bool = False
+    ) -> dict[str, Any]:
+        """Fetch a requested ALFRED vintage; normalization needs release availability."""
         return self._json(
             "fred/series/observations",
             {"series_id": series_id, "vintage_dates": vintage_date},
             f"alfred/{series_id}-{vintage_date}.json",
+            refresh=refresh,
         )
 
-    def _json(self, endpoint: str, params: dict[str, str], cache_name: str) -> dict[str, Any]:
+    def _cache_is_fresh(self, path: Path) -> bool:
+        if not path.exists():
+            return False
+        if self.cache_ttl is None:
+            return True
+        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        return datetime.now(UTC) - modified <= self.cache_ttl
+
+    def _json(
+        self, endpoint: str, params: dict[str, str], cache_name: str, *, refresh: bool
+    ) -> dict[str, Any]:
         path = self.cache_dir / cache_name
-        if path.exists():
-            return json.loads(path.read_text())
+        if not refresh and self._cache_is_fresh(path):
+            return self._read_json(path)
         if not self.api_key:
             raise ProviderConfigurationError(
                 "FRED_API_KEY must be supplied for uncached FRED requests"
@@ -136,60 +154,92 @@ class FederalReserveProvider(DataProvider):
             except json.JSONDecodeError as error:
                 raise ProviderResponseError("FRED returned invalid JSON") from error
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(data, sort_keys=True))
+            encoded = json.dumps(data, sort_keys=True)
+            path.write_text(encoded)
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            snapshot = path.parent / "snapshots" / f"{path.stem}-{timestamp}{path.suffix}"
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            snapshot.write_text(encoded)
             return data
 
         return self.retry_policy.run(download)
 
     @staticmethod
-    def normalize_fred(
-        payload: dict[str, Any],
-        series_id: str,
-        *,
-        retrieved_at: datetime | None = None,
-        vintage: bool = False,
-    ) -> list[MacroObservation]:
+    def _definition(series_id: str) -> SeriesDefinition:
         definition = FRED_SERIES.get(series_id)
         if definition is None:
             raise ValueError(f"No series metadata registered for {series_id!r}")
-        retrieved = retrieved_at or datetime.now(UTC)
-        result: list[MacroObservation] = []
+        return definition
+
+    @classmethod
+    def normalize_current_fred(
+        cls, payload: dict[str, Any], series_id: str, *, retrieved_at: datetime | None = None
+    ) -> list[MacroObservation]:
+        """Normalize current FRED values; realtime_start is not an original release date."""
+        definition, retrieved = cls._definition(series_id), retrieved_at or datetime.now(UTC)
+        return [
+            MacroObservation(
+                series_id=series_id,
+                observation_date=datetime.fromisoformat(item["date"]).date(),
+                publication_date=None,
+                first_available_on=None,
+                vintage_date=_date_field(item, "realtime_start"),
+                retrieved_at=retrieved,
+                value=float(item["value"]),
+                unit=definition.unit,
+                source="fred_current",
+                revision_status=RevisionStatus.UNKNOWN,
+                frequency=definition.frequency,
+                provenance_url="https://fred.stlouisfed.org/series/" + series_id,
+                point_in_time_eligible=False,
+            )
+            for item in payload.get("observations", [])
+            if item.get("value") != "."
+        ]
+
+    @classmethod
+    def normalize_alfred(
+        cls,
+        payload: dict[str, Any],
+        series_id: str,
+        *,
+        availability_by_observation: Mapping[date, date],
+        retrieved_at: datetime | None = None,
+    ) -> list[MacroObservation]:
+        """Normalize a historical ALFRED vintage using a complete release-calendar mapping."""
+        definition, retrieved = cls._definition(series_id), retrieved_at or datetime.now(UTC)
+        result = []
         for item in payload.get("observations", []):
             if item.get("value") == ".":
                 continue
-            observation_date = datetime.fromisoformat(item["date"]).date()
-            vintage_date = _date_field(item, "vintage_date", "realtime_start")
-            publication_date = _date_field(
-                item, "publication_date", "release_date", "realtime_start"
-            )
-            # FRED/ALFRED's realtime_start is the first vintage containing this value.
-            first_available_on = _date_field(item, "first_available_on", "realtime_start")
-            if first_available_on is None:
+            observed = datetime.fromisoformat(item["date"]).date()
+            available = availability_by_observation.get(observed)
+            if available is None:
                 raise ValueError(
-                    f"{series_id} observation {observation_date} lacks public availability"
+                    f"{series_id} observation {observed} lacks original public availability"
                 )
-            status = (
-                RevisionStatus.REVISED
-                if vintage and definition.revisions_occur
-                else RevisionStatus.INITIAL
-            )
             result.append(
                 MacroObservation(
                     series_id=series_id,
-                    observation_date=observation_date,
-                    publication_date=publication_date or first_available_on,
-                    first_available_on=first_available_on,
-                    vintage_date=vintage_date,
+                    observation_date=observed,
+                    publication_date=available,
+                    first_available_on=available,
+                    vintage_date=_date_field(item, "realtime_start"),
                     retrieved_at=retrieved,
                     value=float(item["value"]),
                     unit=definition.unit,
-                    source="alfred" if vintage else "fred",
-                    revision_status=status,
+                    source="alfred",
+                    revision_status=RevisionStatus.REVISED
+                    if definition.revisions_occur
+                    else RevisionStatus.INITIAL,
                     frequency=definition.frequency,
                     provenance_url="https://fred.stlouisfed.org/series/" + series_id,
+                    point_in_time_eligible=True,
                 )
             )
         return result
+
+    normalize_fred = normalize_current_fred
 
     @staticmethod
     def normalize_h41(
@@ -219,3 +269,13 @@ class FederalReserveProvider(DataProvider):
             document_hash=hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
             observations=observations,
         )
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any]:
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            raise ProviderResponseError(f"Cached FRED JSON is invalid: {path}") from error
+        if not isinstance(data, dict):
+            raise ProviderResponseError(f"Cached FRED JSON must be an object: {path}")
+        return data
