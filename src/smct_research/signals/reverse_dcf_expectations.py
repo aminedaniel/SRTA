@@ -44,7 +44,7 @@ class ReverseDCFExpectationsSignal(ResearchSignal):
             else 0.15
         )
         confidence = max(0.0, min(1.0, quality * (1 - age_decay) * (1 - dilution_decay)))
-        score = max(-25.0, min(25.0, score * confidence))
+        score = max(-25.0, min(25.0, score))
         direction = (
             SignalDirection.POSITIVE
             if score > 2

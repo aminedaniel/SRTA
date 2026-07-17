@@ -113,9 +113,11 @@ class DCFScenario(BaseModel):
         numeric = (
             self.initial_revenue_growth,
             self.terminal_revenue_growth,
+            self.initial_fcf_margin if self.initial_fcf_margin is not None else 0.0,
             self.terminal_fcf_margin,
             self.discount_rate,
             self.terminal_growth_rate,
+            self.annual_dilution if self.annual_dilution is not None else 0.0,
         )
         if not all(math.isfinite(value) for value in numeric):
             raise ValueError("scenario assumptions must be finite")
@@ -125,9 +127,16 @@ class DCFScenario(BaseModel):
             raise ValueError("revenue growth must be greater than -100%")
         if self.terminal_fcf_margin <= 0:
             raise ValueError("terminal_fcf_margin must be positive")
-        for path in (self.revenue_growth_path, self.fcf_margin_path):
-            if path is not None and not all(math.isfinite(value) for value in path):
-                raise ValueError("explicit projection paths must be finite")
+        if self.revenue_growth_path is not None:
+            if not all(math.isfinite(value) and value > -1 for value in self.revenue_growth_path):
+                raise ValueError(
+                    "revenue growth path entries must be finite and greater than -100%"
+                )
+        if self.fcf_margin_path is not None:
+            if not all(math.isfinite(value) for value in self.fcf_margin_path):
+                raise ValueError("FCF margin path entries must be finite")
+            if self.fcf_margin_path[-1] <= 0:
+                raise ValueError("final FCF margin path entry must be positive")
         return self
 
 
@@ -215,6 +224,8 @@ def value_dcf(inputs: ReverseDCFInputs, scenario: DCFScenario) -> DCFValuationRe
                 if scenario.annual_dilution is not None
                 else inputs.expected_annual_dilution
             )
+            if shares <= 0 or not math.isfinite(shares):
+                raise ValueError("projected diluted shares must be positive and finite")
             fcf = revenue * margin
             projected.append(
                 ProjectedYear(
@@ -356,24 +367,31 @@ def sensitivity(
         for growth in terminal_growth_rates:
             for margin in terminal_margins:
                 for cagr in revenue_cagrs:
-                    tested = scenario.model_copy(
-                        update={
-                            "discount_rate": rate,
-                            "terminal_growth_rate": growth,
-                            "terminal_fcf_margin": margin,
-                            "initial_revenue_growth": cagr,
-                            "terminal_revenue_growth": cagr,
-                        }
-                    )
-                    value = value_dcf(inputs, tested)
+                    try:
+                        tested = DCFScenario.model_validate(
+                            {
+                                **scenario.model_dump(),
+                                "discount_rate": rate,
+                                "terminal_growth_rate": growth,
+                                "terminal_fcf_margin": margin,
+                                "initial_revenue_growth": cagr,
+                                "terminal_revenue_growth": cagr,
+                            }
+                        )
+                        value = value_dcf(inputs, tested)
+                        per_share = value.diluted_value_per_share if value.valid else None
+                        diagnostics = value.diagnostics
+                    except ValueError as error:
+                        per_share = None
+                        diagnostics = [f"invalid sensitivity assumptions: {error}"]
                     results.append(
                         DCFSensitivityResult(
                             discount_rate=rate,
                             terminal_growth_rate=growth,
                             terminal_fcf_margin=margin,
                             revenue_cagr=cagr,
-                            value_per_share=value.diluted_value_per_share if value.valid else None,
-                            diagnostics=value.diagnostics,
+                            value_per_share=per_share,
+                            diagnostics=diagnostics,
                         )
                     )
     return results

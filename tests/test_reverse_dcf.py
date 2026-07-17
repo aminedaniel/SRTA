@@ -113,3 +113,28 @@ def test_input_dates_and_zero_history() -> None:
         inputs(available_at={name: NOW + timedelta(days=1) for name in inputs().available_at})
     with pytest.raises(ValueError, match="missing availability"):
         inputs(available_at={})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"annual_dilution": float("inf")},
+        {"initial_fcf_margin": float("nan")},
+        {"revenue_growth_path": [-1.0] * 5},
+        {"fcf_margin_path": [0.1, 0.1, 0.1, 0.1, 0.0]},
+    ],
+)
+def test_invalid_scenario_assumptions_are_rejected(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        scenario(**overrides)
+
+
+def test_invalid_sensitivity_cells_are_reported() -> None:
+    cells = sensitivity(inputs(), scenario(), [0.02], [0.03], [0.1], [0.1])
+    assert cells[0].value_per_share is None
+    assert "invalid sensitivity" in cells[0].diagnostics[0]
+
+
+def test_sensitivity_rejects_explicit_paths() -> None:
+    with pytest.raises(ValueError, match="explicit projection paths"):
+        sensitivity(inputs(), scenario(revenue_growth_path=[0.1] * 5), [0.1], [0.03], [0.1], [0.1])
