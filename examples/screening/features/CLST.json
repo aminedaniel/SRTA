@@ -1,0 +1,20 @@
+{
+  "as_of": "2026-07-01T00:00:00Z",
+  "sources": {
+    "financials": "offline fixture"
+  },
+  "source_as_of": {
+    "financials": "2026-06-30T00:00:00Z"
+  },
+  "ticker": "CLST",
+  "values": {
+    "form4_unique_insiders_buying_7d": 4,
+    "form4_aggregate_purchase_value_7d": 400000,
+    "form4_purchase_value_market_cap_ratio_7d": 0.001,
+    "form4_largest_individual_purchase_7d": 150000,
+    "form4_officer_director_10pct_participants_7d": 3,
+    "form4_repeated_purchase_insiders_7d": 2,
+    "form4_filing_age_days": 2,
+    "form4_cluster_buying_7d": true
+  }
+}

@@ -77,10 +77,12 @@ class Company(BaseModel):
     market_cap_usd: float = Field(gt=0)
     sector: str
     industry: str | None = None
-    exchange: str | None = None
+    exchange: str | None = "NASDAQ"
+    cik: str | None = None
     country: str = "US"
     average_daily_dollar_volume: float | None = Field(default=None, ge=0)
     is_active: bool = True
+    security_type: str = "common_equity"
 
     @model_validator(mode="after")
     def normalize_ticker(self) -> Company:
@@ -93,6 +95,7 @@ class FeatureSnapshot(BaseModel):
     as_of: datetime = Field(default_factory=lambda: datetime.now(UTC))
     values: dict[str, float | int | str | bool | None] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict)
+    source_as_of: dict[str, datetime] = Field(default_factory=dict)
 
     def require_float(self, key: str) -> float:
         value = self.values.get(key)

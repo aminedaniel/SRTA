@@ -1,0 +1,13 @@
+{
+  "as_of": "2026-07-01T00:00:00Z",
+  "sources": {
+    "financials": "offline fixture"
+  },
+  "source_as_of": {
+    "financials": "2026-06-30T00:00:00Z"
+  },
+  "ticker": "MISS",
+  "values": {
+    "ev_sales_current": 4
+  }
+}

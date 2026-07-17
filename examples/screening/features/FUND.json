@@ -1,0 +1,46 @@
+{
+  "as_of": "2026-07-01T00:00:00Z",
+  "sources": {
+    "financials": "offline fixture"
+  },
+  "source_as_of": {
+    "financials": "2026-06-30T00:00:00Z"
+  },
+  "ticker": "FUND",
+  "values": {
+    "ev_sales_current": 3,
+    "ev_sales_3y_median": 8,
+    "revenue_growth_current": 0.3,
+    "revenue_growth_3y_median": 0.35,
+    "reddit_mentions_30d": 50,
+    "reddit_mentions_percentile": 20,
+    "operating_momentum_score": 75,
+    "promotional_language_share": 5,
+    "congress_purchase_count_90d": 5,
+    "congress_sale_count_90d": 0,
+    "congress_unique_buyers_90d": 4,
+    "congress_estimated_purchase_usd_90d": 500000,
+    "congress_latest_purchase_age_days": 10,
+    "congress_median_disclosure_lag_days": 20,
+    "congress_committee_relevance_score": 70,
+    "congress_repeat_buyer_score": 60,
+    "form4_unique_insiders_buying_7d": 4,
+    "form4_aggregate_purchase_value_7d": 400000,
+    "form4_purchase_value_market_cap_ratio_7d": 0.001,
+    "form4_largest_individual_purchase_7d": 150000,
+    "form4_officer_director_10pct_participants_7d": 3,
+    "form4_repeated_purchase_insiders_7d": 2,
+    "form4_filing_age_days": 2,
+    "form4_cluster_buying_7d": true,
+    "liquidity_regime": "expansion",
+    "monetary_policy_regime": "easing",
+    "regime_confidence": 0.8,
+    "renaissance_13f_status": "increased",
+    "renaissance_13f_share_change_percent": 30,
+    "renaissance_13f_consecutive_quarters_held": 3,
+    "renaissance_13f_position_size_percentile": 80,
+    "renaissance_13f_disclosure_age_days": 45,
+    "renaissance_13f_lag_decay": 0.7,
+    "macro_rate_sensitivity": 50
+  }
+}
