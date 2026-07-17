@@ -43,6 +43,7 @@ class RankedResult(BaseModel):
     positive_signals: list[str] = Field(default_factory=list)
     negative_signals: list[str] = Field(default_factory=list)
     unavailable_signals: list[str] = Field(default_factory=list)
+    signal_diagnostics: list[str] = Field(default_factory=list)
     top_supporting_explanations: list[str] = Field(default_factory=list)
     universe_eligible: bool
     exclusion_reasons: list[str] = Field(default_factory=list)

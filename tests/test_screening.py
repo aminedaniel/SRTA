@@ -20,7 +20,7 @@ def _service() -> BatchEvaluationService:
 def test_universe_input_and_exclusion_reasons() -> None:
     companies = load_universe(FIXTURES / "universe.json")
     fund = next(company for company in companies if company.ticker == "FUND")
-    assert "excluded_security_type:etf" in UniversePolicy().exclusion_reasons(fund)
+    assert "unsupported_security_type:etf" in UniversePolicy().exclusion_reasons(fund)
 
 
 def test_batch_ranking_missing_coverage_and_point_in_time() -> None:
@@ -177,3 +177,58 @@ def test_supporting_explanations_are_positive_contribution_ranked() -> None:
     assert result.top_supporting_explanations == [
         f"{item.signal_id}: {item.thesis}" for item in expected
     ]
+
+
+def test_security_type_allowlist_and_active_status_are_explicit() -> None:
+    company = load_universe(FIXTURES / "universe.json")[0]
+    company.security_type = "Common Stock"
+    assert UniversePolicy().includes(company)
+    company.security_type = "convertible_note"
+    assert "unsupported_security_type:convertible_note" in UniversePolicy().exclusion_reasons(
+        company
+    )
+    company.security_type = "common_equity"
+    company.is_active = None
+    assert "unknown_active_status" in UniversePolicy().exclusion_reasons(company)
+
+
+def test_malformed_optional_signals_do_not_abort_batch() -> None:
+    company, unaffected_company = load_universe(FIXTURES / "universe.json")[:2]
+    snapshot = FeatureSnapshot(
+        ticker=company.ticker,
+        values={
+            "ev_sales_current": 3,
+            "ev_sales_3y_median": 0,
+            "revenue_growth_current": 0.3,
+            "revenue_growth_3y_median": 0.35,
+            "reddit_mentions_30d": "not-a-number",  # type: ignore[dict-item]
+            "reddit_mentions_percentile": 20,
+            "operating_momentum_score": 75,
+            "promotional_language_share": 5,
+        },
+    )
+    unaffected_snapshot = FeatureSnapshot(
+        ticker=unaffected_company.ticker,
+        values={
+            "ev_sales_current": 3,
+            "ev_sales_3y_median": 8,
+            "revenue_growth_current": 0.3,
+            "revenue_growth_3y_median": 0.35,
+        },
+    )
+    results = _service().evaluate(
+        [company, unaffected_company],
+        {company.ticker: snapshot, unaffected_company.ticker: unaffected_snapshot},
+        UniversePolicy(),
+    )
+    result = next(item for item in results if item.ticker == company.ticker)
+    unaffected_result = next(item for item in results if item.ticker == unaffected_company.ticker)
+    assert {"A1", "F1"} <= set(result.unavailable_signals)
+    assert result.signals_evaluated == 0
+    assert any(
+        diagnostic.startswith("signal_unavailable:A1:") for diagnostic in result.signal_diagnostics
+    )
+    assert any(
+        diagnostic.startswith("signal_unavailable:F1:") for diagnostic in result.signal_diagnostics
+    )
+    assert unaffected_result.signals_evaluated == 1

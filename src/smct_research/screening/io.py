@@ -109,6 +109,7 @@ def _flat_row(result: RankedResult) -> dict[str, str | int | float | None]:
         "positive_signals": "; ".join(result.positive_signals),
         "negative_signals": "; ".join(result.negative_signals),
         "unavailable_signals": "; ".join(result.unavailable_signals),
+        "signal_diagnostics": " | ".join(result.signal_diagnostics),
         "top_supporting_explanations": " | ".join(result.top_supporting_explanations),
         "evaluation_timestamp": result.evaluation_timestamp.isoformat(),
         "signals_evaluated": result.signals_evaluated,

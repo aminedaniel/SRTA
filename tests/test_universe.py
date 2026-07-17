@@ -12,6 +12,7 @@ def test_includes_liquid_small_cap_software_company() -> None:
         exchange="NASDAQ",
         country="US",
         security_type="common_equity",
+        is_active=True,
         average_daily_dollar_volume=5_000_000,
     )
     assert UniversePolicy().includes(company)
@@ -26,6 +27,7 @@ def test_excludes_large_cap() -> None:
         exchange="NASDAQ",
         country="US",
         security_type="common_equity",
+        is_active=True,
         average_daily_dollar_volume=50_000_000,
     )
     assert not UniversePolicy().includes(company)

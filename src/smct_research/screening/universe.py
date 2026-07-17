@@ -24,14 +24,23 @@ class UniversePolicy(BaseModel):
         }
     )
     allowed_exchanges: set[str] = Field(default_factory=lambda: {"NASDAQ", "NYSE", "NYSEAMERICAN"})
-    excluded_security_types: set[str] = Field(
-        default_factory=lambda: {"etf", "fund", "warrant", "preferred", "otc"}
+    eligible_security_types: set[str] = Field(default_factory=lambda: {"common_equity"})
+    security_type_aliases: dict[str, str] = Field(
+        default_factory=lambda: {
+            "common": "common_equity",
+            "common stock": "common_equity",
+            "common_stock": "common_equity",
+            "ordinary share": "common_equity",
+            "ordinary_shares": "common_equity",
+        }
     )
 
     def exclusion_reasons(self, company: Company) -> list[str]:
         """Return every reason a company cannot enter the screened universe."""
         reasons: list[str] = []
-        if not company.is_active:
+        if company.is_active is None:
+            reasons.append("unknown_active_status")
+        elif not company.is_active:
             reasons.append("inactive_security")
         if not company.country:
             reasons.append("unknown_country")
@@ -43,8 +52,13 @@ class UniversePolicy(BaseModel):
             )
         if not company.security_type:
             reasons.append("unknown_security_type")
-        elif company.security_type.lower() in self.excluded_security_types:
-            reasons.append(f"excluded_security_type:{company.security_type.lower()}")
+        elif (
+            self._normalized_security_type(company.security_type)
+            not in self.eligible_security_types
+        ):
+            reasons.append(
+                f"unsupported_security_type:{self._normalized_security_type(company.security_type)}"
+            )
         if company.market_cap_usd < self.minimum_market_cap_usd:
             reasons.append("market_cap_below_minimum")
         if company.market_cap_usd > self.maximum_market_cap_usd:
@@ -60,3 +74,7 @@ class UniversePolicy(BaseModel):
 
     def includes(self, company: Company) -> bool:
         return not self.exclusion_reasons(company)
+
+    def _normalized_security_type(self, value: str) -> str:
+        normalized = " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+        return self.security_type_aliases.get(normalized, normalized.replace(" ", "_"))

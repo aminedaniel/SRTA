@@ -37,6 +37,7 @@ class BatchEvaluationService:
             unavailable = [signal.id for signal in signals]
             stale: list[str] = []
             point_in_time: list[str] = []
+            diagnostics: list[str] = []
             if snapshot is None:
                 point_in_time.append("missing_feature_snapshot")
             else:
@@ -56,9 +57,15 @@ class BatchEvaluationService:
                 if future_snapshot or future_sources:
                     results = []
                 else:
-                    results = self.registry.evaluate_all(snapshot)
-                    for result in results:
+                    for signal in signals:
+                        try:
+                            signal.validate(snapshot)
+                            result = signal.evaluate(snapshot)
+                        except (ArithmeticError, KeyError, TypeError, ValueError) as error:
+                            diagnostics.append(f"signal_unavailable:{signal.id}:{error}")
+                            continue
                         result.evaluated_at = evaluated_at
+                        results.append(result)
                 unavailable = [s.id for s in signals if s.id not in {r.signal_id for r in results}]
             completeness = (100 * len(results) / len(signals)) if signals else 100.0
             score = self.scorer.score(results) if results else None
@@ -71,6 +78,7 @@ class BatchEvaluationService:
                     positive_signals=score.positive_signals if score else [],
                     negative_signals=score.negative_signals if score else [],
                     unavailable_signals=unavailable,
+                    signal_diagnostics=diagnostics,
                     top_supporting_explanations=self._supporting_explanations(results),
                     universe_eligible=eligible,
                     exclusion_reasons=reasons,

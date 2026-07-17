@@ -86,7 +86,7 @@ class Company(BaseModel):
     cik: str | None = None
     country: str | None = None
     average_daily_dollar_volume: float | None = Field(default=None, ge=0)
-    is_active: bool = True
+    is_active: bool | None = None
     security_type: str | None = None
 
     @model_validator(mode="after")
