@@ -43,6 +43,8 @@ def test_provider_ingests_current_and_archived_form4_filings_end_to_end(tmp_path
     )
     filings = provider.form4_filings("123")
     assert [filing["form"] for filing in filings] == ["4", "4/A"]
+    filing_records = provider.form4_filing_records("123")
+    assert len(filing_records) == 2 and filing_records[1].is_amendment is True
     records = provider.form4_transactions("123")
     assert len(records) == 2
     assert records[0].reporting_owner_cik == "789"

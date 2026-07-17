@@ -12,7 +12,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from smct_research.form4 import Form4Transaction, parse_form4_xml
+from smct_research.form4 import Form4Filing, Form4Transaction, parse_form4_filing
 from smct_research.institutional_13f import (
     Form13FHolding,
     parse_amendment_type,
@@ -170,10 +170,9 @@ class SecEdgarProvider(DataProvider):
             filings, key=lambda filing: (filing["filing_date"], filing["accession_number"])
         )
 
-    def form4_transactions(self, issuer_cik: str | int) -> list[Form4Transaction]:
-        """Download and normalize issuer Form 4 documents, including amendments."""
-
-        records: list[Form4Transaction] = []
+    def form4_filing_records(self, issuer_cik: str | int) -> list[Form4Filing]:
+        """Fetch filings with metadata, including amendments with no purchase rows."""
+        records: list[Form4Filing] = []
         cik = str(int(str(issuer_cik)))
         for filing in self.form4_filings(issuer_cik):
             accession = filing["accession_number"].replace("-", "")
@@ -189,8 +188,8 @@ class SecEdgarProvider(DataProvider):
                 )
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_bytes(payload)
-            records.extend(
-                parse_form4_xml(
+            records.append(
+                parse_form4_filing(
                     payload,
                     filing_date=date.fromisoformat(filing["filing_date"]),
                     accession_number=filing["accession_number"],
@@ -198,6 +197,14 @@ class SecEdgarProvider(DataProvider):
                 )
             )
         return records
+
+    def form4_transactions(self, issuer_cik: str | int) -> list[Form4Transaction]:
+        """Return qualifying transactions; use ``form4_filing_records`` for replacement metadata."""
+        return [
+            transaction
+            for filing in self.form4_filing_records(issuer_cik)
+            for transaction in filing.transactions
+        ]
 
 
 class Renaissance13FEdgarProvider(SecEdgarProvider):

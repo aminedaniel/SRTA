@@ -21,9 +21,9 @@ class Form4ClusterBuyingSignal(ResearchSignal):
         "form4_unique_insiders_buying_7d",
         "form4_aggregate_purchase_value_7d",
         "form4_purchase_value_market_cap_ratio_7d",
-        "form4_largest_individual_purchase_30d",
-        "form4_officer_director_10pct_participants_30d",
-        "form4_repeated_purchase_insiders_30d",
+        "form4_largest_individual_purchase_7d",
+        "form4_officer_director_10pct_participants_7d",
+        "form4_repeated_purchase_insiders_7d",
         "form4_filing_age_days",
         "form4_cluster_buying_7d",
     )
@@ -33,11 +33,11 @@ class Form4ClusterBuyingSignal(ResearchSignal):
         buyers = max(0.0, snapshot.require_float("form4_unique_insiders_buying_7d"))
         value = max(0.0, snapshot.require_float("form4_aggregate_purchase_value_7d"))
         cap_ratio = max(0.0, snapshot.require_float("form4_purchase_value_market_cap_ratio_7d"))
-        largest = max(0.0, snapshot.require_float("form4_largest_individual_purchase_30d"))
+        largest = max(0.0, snapshot.require_float("form4_largest_individual_purchase_7d"))
         leadership = max(
-            0.0, snapshot.require_float("form4_officer_director_10pct_participants_30d")
+            0.0, snapshot.require_float("form4_officer_director_10pct_participants_7d")
         )
-        repeat = max(0.0, snapshot.require_float("form4_repeated_purchase_insiders_30d"))
+        repeat = max(0.0, snapshot.require_float("form4_repeated_purchase_insiders_7d"))
         age = max(0.0, snapshot.require_float("form4_filing_age_days"))
         cluster = bool(snapshot.values["form4_cluster_buying_7d"]) and buyers >= 3
         material = cap_ratio >= 0.0001 and value >= 25_000

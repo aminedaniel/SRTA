@@ -72,6 +72,33 @@ class Form4Transaction(BaseModel):
         return (self.issuer_cik, self.reporting_owner_cik, self.report_date)
 
 
+class Form4Filing(BaseModel):
+    """Filing-level metadata retained even when it contains no qualifying buy."""
+
+    issuer_cik: str
+    reporting_owner_ciks: tuple[str, ...]
+    report_date: date
+    filing_date: date
+    accession_number: str
+    is_amendment: bool = False
+    is_joint_filing: bool = False
+    transactions: list[Form4Transaction] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize(self) -> Form4Filing:
+        self.issuer_cik = self.issuer_cik.lstrip("0") or "0"
+        self.reporting_owner_ciks = tuple(
+            cik.lstrip("0") or "0" for cik in self.reporting_owner_ciks
+        )
+        return self
+
+    @property
+    def amendment_filing_key(self) -> tuple[str, str, date] | None:
+        if len(self.reporting_owner_ciks) != 1:
+            return None
+        return (self.issuer_cik, self.reporting_owner_ciks[0], self.report_date)
+
+
 def _text(element: ET.Element, path: str) -> str:
     node = element.find(path)
     return (node.text or "").strip() if node is not None else ""
@@ -162,8 +189,41 @@ def parse_form4_xml(
     return rows
 
 
+def parse_form4_filing(
+    payload: bytes, *, filing_date: date, accession_number: str, is_amendment: bool = False
+) -> Form4Filing:
+    """Parse retained filing metadata and any qualifying purchases.
+
+    Metadata is deliberately returned for amendments with no qualifying rows so
+    callers can remove the superseded filing from point-in-time features.
+    """
+    root = ET.fromstring(payload)
+    for element in root.iter():
+        element.tag = element.tag.rsplit("}", 1)[-1]
+    issuer_cik = _text(root, ".//issuer/issuerCik")
+    owners = root.findall(".//reportingOwner")
+    owner_ciks = tuple(_text(owner, ".//reportingOwnerId/rptOwnerCik") for owner in owners)
+    report_date_text = _text(root, ".//periodOfReport")
+    report_date = date.fromisoformat(report_date_text) if report_date_text else filing_date
+    return Form4Filing(
+        issuer_cik=issuer_cik,
+        reporting_owner_ciks=owner_ciks,
+        report_date=report_date,
+        filing_date=filing_date,
+        accession_number=accession_number,
+        is_amendment=is_amendment,
+        is_joint_filing=len(owners) != 1,
+        transactions=parse_form4_xml(
+            payload,
+            filing_date=filing_date,
+            accession_number=accession_number,
+            is_amendment=is_amendment,
+        ),
+    )
+
+
 def deduplicate_form4_transactions(
-    rows: list[Form4Transaction], as_of: date
+    rows: list[Form4Transaction], as_of: date, filings: list[Form4Filing] | None = None
 ) -> list[Form4Transaction]:
     """Apply public-date and filing-level Form 4/A replacement semantics.
 
@@ -172,9 +232,17 @@ def deduplicate_form4_transactions(
     collapsed at the underlying purchase-event level.
     """
     visible = [row for row in rows if row.filing_date <= as_of and row.is_qualifying_purchase]
+    amendment_keys = {
+        key
+        for filing in filings or []
+        if filing.is_amendment and filing.filing_date <= as_of
+        for key in [filing.amendment_filing_key]
+        if key is not None
+    }
     amendments: dict[tuple[str, str, date], Form4Transaction] = {}
     for row in visible:
         if row.is_amendment:
+            amendment_keys.add(row.amendment_filing_key)
             prior = amendments.get(row.amendment_filing_key)
             if prior is None or (row.filing_date, row.accession_number) > (
                 prior.filing_date,
@@ -184,7 +252,10 @@ def deduplicate_form4_transactions(
     replaced = [
         row
         for row in visible
-        if row.amendment_filing_key not in amendments
+        if (
+            row.amendment_filing_key not in amendment_keys
+            and row.amendment_filing_key not in amendments
+        )
         or (
             row.is_amendment
             and row.accession_number == amendments[row.amendment_filing_key].accession_number
@@ -203,10 +274,14 @@ def deduplicate_form4_transactions(
 
 
 def form4_rolling_features(
-    rows: list[Form4Transaction], *, as_of: date, market_cap_usd: float
+    rows: list[Form4Transaction],
+    *,
+    as_of: date,
+    market_cap_usd: float,
+    filings: list[Form4Filing] | None = None,
 ) -> dict[str, float | int | bool]:
     """Create point-in-time features from qualifying purchases available by *as_of*."""
-    visible = deduplicate_form4_transactions(rows, as_of)
+    visible = deduplicate_form4_transactions(rows, as_of, filings)
     by_window = {
         days: [r for r in visible if 0 <= (as_of - r.transaction_date).days <= days]
         for days in (7, 14, 30)
@@ -215,7 +290,7 @@ def form4_rolling_features(
     values: dict[str, float | int | bool] = {}
     for days, window in by_window.items():
         values[f"form4_unique_insiders_buying_{days}d"] = len(
-            {r.insider_name.casefold() for r in window}
+            {r.reporting_owner_cik for r in window}
         )
     total = sum(r.transaction_value for r in recent)
     triggered = by_window[7]
@@ -230,25 +305,40 @@ def form4_rolling_features(
             "form4_purchase_value_market_cap_ratio_30d": total / market_cap_usd
             if market_cap_usd > 0
             else 0.0,
+            "form4_largest_individual_purchase_7d": max(
+                (r.transaction_value for r in triggered), default=0.0
+            ),
             "form4_largest_individual_purchase_30d": max(
                 (r.transaction_value for r in recent), default=0.0
             ),
+            "form4_officer_director_10pct_participants_7d": len(
+                {
+                    r.reporting_owner_cik
+                    for r in triggered
+                    if r.is_officer or r.is_director or r.is_ten_percent_owner
+                }
+            ),
             "form4_officer_director_10pct_participants_30d": len(
                 {
-                    r.insider_name.casefold()
+                    r.reporting_owner_cik
                     for r in recent
                     if r.is_officer or r.is_director or r.is_ten_percent_owner
                 }
             ),
+            "form4_repeated_purchase_insiders_7d": sum(
+                1
+                for grouped in _group_by_insider(triggered).values()
+                if len({(row.transaction_date, row.accession_number) for row in grouped}) > 1
+            ),
             "form4_repeated_purchase_insiders_30d": sum(
                 1
                 for grouped in _group_by_insider(recent).values()
-                if len({row.purchase_event_key for row in grouped}) > 1
+                if len({(row.transaction_date, row.accession_number) for row in grouped}) > 1
             ),
             "form4_filing_age_days": min(
                 (max(0, (as_of - r.filing_date).days) for r in by_window[7]), default=999
             ),
-            "form4_cluster_buying_7d": len({r.insider_name.casefold() for r in by_window[7]}) >= 3,
+            "form4_cluster_buying_7d": len({r.reporting_owner_cik for r in by_window[7]}) >= 3,
         }
     )
     return values
@@ -257,5 +347,5 @@ def form4_rolling_features(
 def _group_by_insider(rows: list[Form4Transaction]) -> dict[str, list[Form4Transaction]]:
     grouped: dict[str, list[Form4Transaction]] = defaultdict(list)
     for row in rows:
-        grouped[row.insider_name.casefold()].append(row)
+        grouped[row.reporting_owner_cik].append(row)
     return grouped

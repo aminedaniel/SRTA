@@ -6,6 +6,7 @@ from smct_research.form4 import (
     Form4Transaction,
     deduplicate_form4_transactions,
     form4_rolling_features,
+    parse_form4_filing,
     parse_form4_xml,
 )
 from smct_research.signals.form4_cluster_buying import Form4ClusterBuyingSignal
@@ -78,9 +79,9 @@ def test_signal_has_no_score_for_isolated_and_caps_score() -> None:
         "form4_unique_insiders_buying_7d": 3,
         "form4_aggregate_purchase_value_7d": 10_000_000,
         "form4_purchase_value_market_cap_ratio_7d": 0.1,
-        "form4_largest_individual_purchase_30d": 5_000_000,
-        "form4_officer_director_10pct_participants_30d": 3,
-        "form4_repeated_purchase_insiders_30d": 2,
+        "form4_largest_individual_purchase_7d": 5_000_000,
+        "form4_officer_director_10pct_participants_7d": 3,
+        "form4_repeated_purchase_insiders_7d": 2,
         "form4_filing_age_days": 0,
         "form4_cluster_buying_7d": True,
     }
@@ -120,3 +121,35 @@ def test_joint_filing_is_excluded_conservatively() -> None:
         parse_form4_xml(joint.encode(), filing_date=date(2026, 7, 11), accession_number="joint")
         == []
     )
+
+
+def test_metadata_only_amendment_removes_prior_purchase_signal() -> None:
+    original = row("Ada", date(2026, 7, 10), date(2026, 7, 11), value=50_000)
+    amendment_xml = (
+        Path("tests/fixtures/sec/form4_purchase.xml")
+        .read_bytes()
+        .replace(b"<transactionCode>P</transactionCode>", b"<transactionCode>A</transactionCode>")
+    )
+    amendment = parse_form4_filing(
+        amendment_xml, filing_date=date(2026, 7, 12), accession_number="amended", is_amendment=True
+    )
+    original.report_date = amendment.report_date
+    original.reporting_owner_cik = amendment.reporting_owner_ciks[0]
+    original.issuer_cik = amendment.issuer_cik
+    assert amendment.transactions == []
+    assert deduplicate_form4_transactions([original], date(2026, 7, 12), [amendment]) == []
+
+
+def test_identity_and_score_inputs_are_limited_to_triggered_cluster() -> None:
+    as_of = date(2026, 7, 17)
+    recent = [row("Same name", date(2026, 7, 10), date(2026, 7, 11)) for _ in range(3)]
+    recent[0].reporting_owner_cik, recent[1].reporting_owner_cik, recent[2].reporting_owner_cik = (
+        "1",
+        "2",
+        "3",
+    )
+    older = row("Older", date(2026, 6, 20), date(2026, 6, 21), value=9_000_000)
+    features = form4_rolling_features(recent + [older], as_of=as_of, market_cap_usd=100_000_000)
+    assert features["form4_unique_insiders_buying_7d"] == 3
+    assert features["form4_aggregate_purchase_value_7d"] == 150_000
+    assert features["form4_largest_individual_purchase_7d"] == 50_000
