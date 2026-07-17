@@ -44,6 +44,8 @@ class PositionActivity:
     consecutive_quarters_held: int
     position_size_percentile: float
     disclosure_age_days: int
+    evidence_reporting_quarter: date | None
+    evidence_filing_date: date | None
 
     def feature_values(self) -> dict[str, float | int | str]:
         """Return non-null values suitable for a deterministic FeatureSnapshot."""
@@ -157,6 +159,28 @@ def latest_public_filings(holdings: list[Form13FHolding], as_of: date) -> list[F
     return selected
 
 
+def _ticker_positions(rows: list[Form13FHolding]) -> dict[str, Form13FHolding]:
+    """Aggregate every reportable CUSIP mapped to each ticker."""
+    grouped: dict[str, list[Form13FHolding]] = defaultdict(list)
+    for row in rows:
+        if row.ticker:
+            grouped[row.ticker.upper()].append(row)
+    return {
+        ticker: Form13FHolding(
+            group[0].reporting_quarter,
+            group[0].filing_date,
+            group[0].accession_number,
+            group[0].amendment_type,
+            group[0].issuer,
+            ",".join(sorted(row.cusip for row in group)),
+            ticker,
+            sum(row.shares for row in group),
+            sum(row.reported_value_usd for row in group),
+        )
+        for ticker, group in grouped.items()
+    }
+
+
 def derive_position_activity(
     holdings: list[Form13FHolding], *, ticker: str, as_of: date
 ) -> PositionActivity:
@@ -164,19 +188,16 @@ def derive_position_activity(
     public = latest_public_filings(holdings, as_of)
     quarters = sorted({row.reporting_quarter for row in public}, reverse=True)
     if not quarters:
-        return PositionActivity(None, "none", 0.0, 0, 0.0, 0)
+        return PositionActivity(None, "none", 0.0, 0, 0.0, 0, None, None)
     current_quarter = quarters[0]
     portfolio = [row for row in public if row.reporting_quarter == current_quarter]
-    current = next((row for row in portfolio if row.ticker == ticker.upper()), None)
+    positions = _ticker_positions(portfolio)
+    current = positions.get(ticker.upper())
     prior_quarter = quarters[1] if len(quarters) > 1 else None
-    prior = next(
-        (
-            row
-            for row in public
-            if row.reporting_quarter == prior_quarter and row.ticker == ticker.upper()
-        ),
-        None,
+    prior_positions = _ticker_positions(
+        [row for row in public if row.reporting_quarter == prior_quarter]
     )
+    prior = prior_positions.get(ticker.upper())
     if current and not prior:
         status, change = "new", 0.0
     elif not current and prior:
@@ -185,24 +206,35 @@ def derive_position_activity(
         change = (current.shares - prior.shares) / prior.shares * 100 if prior.shares else 0.0
         status = "increased" if change > 0 else "reduced" if change < 0 else "unchanged"
     else:
-        return PositionActivity(None, "none", 0.0, 0, 0.0, 0)
+        return PositionActivity(None, "none", 0.0, 0, 0.0, 0, None, None)
     target = current or prior
     assert target is not None
     held = 0
     for quarter in quarters:
-        if any(row.reporting_quarter == quarter and row.ticker == ticker.upper() for row in public):
+        if ticker.upper() in _ticker_positions(
+            [row for row in public if row.reporting_quarter == quarter]
+        ):
             held += 1
         else:
             break
     percentile = 0.0
-    if current and portfolio:
+    if current and positions:
         percentile = (
-            sum(row.reported_value_usd <= current.reported_value_usd for row in portfolio)
-            / len(portfolio)
+            sum(row.reported_value_usd <= current.reported_value_usd for row in positions.values())
+            / len(positions)
             * 100
         )
+    # An exit becomes knowable only when the subsequent report is filed.
+    evidence = current or (portfolio[0] if portfolio else target)
     return PositionActivity(
-        target, status, change, held, percentile, max(0, (as_of - target.filing_date).days)
+        target,
+        status,
+        change,
+        held,
+        percentile,
+        max(0, (as_of - evidence.filing_date).days),
+        evidence.reporting_quarter,
+        evidence.filing_date,
     )
 
 
@@ -210,5 +242,7 @@ def disclosure_lag_decay(activity: PositionActivity) -> float:
     """Decay delayed 13F evidence; 45 days is the statutory filing window."""
     if activity.holding is None:
         return 0.0
-    lag = max(0, (activity.holding.filing_date - activity.holding.reporting_quarter).days)
+    if activity.evidence_filing_date is None or activity.evidence_reporting_quarter is None:
+        return 0.0
+    lag = max(0, (activity.evidence_filing_date - activity.evidence_reporting_quarter).days)
     return math.exp(-lag / 45.0) * math.exp(-activity.disclosure_age_days / 120.0)

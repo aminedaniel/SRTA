@@ -77,15 +77,38 @@ def test_new_increase_unchanged_exit_stale_and_lookahead_prevention() -> None:
         as_of=date(2024, 5, 15),
     )
     assert unchanged.status == "unchanged"
-    exited = derive_position_activity([q1, q2_other], ticker="EX", as_of=date(2024, 5, 15))
+    exited = derive_position_activity([q1, q2_other], ticker="EX", as_of=date(2024, 5, 20))
     assert exited.status == "exited" and exited.position_size_percentile == 0
+    assert exited.disclosure_age_days == 5
+    assert exited.evidence_filing_date == date(2024, 5, 15)
     assert all(value is not None for value in exited.feature_values().values())
+
+
+def test_activity_aggregates_all_cusips_mapped_to_the_same_ticker() -> None:
+    q1 = holding(date(2023, 12, 31), date(2024, 2, 14), "EX", 100, 10_000)
+    q2_a = holding(date(2024, 3, 31), date(2024, 5, 15), "EX", 75, 7_500)
+    q2_b = Form13FHolding(
+        date(2024, 3, 31),
+        date(2024, 5, 15),
+        "x-2024-05-15",
+        AmendmentType.NONE,
+        "EX class B",
+        "SECOND",
+        "EX",
+        75,
+        7_500,
+    )
+    activity = derive_position_activity([q1, q2_a, q2_b], ticker="EX", as_of=date(2024, 5, 15))
+    assert activity.status == "increased"
+    assert activity.holding is not None and activity.holding.shares == 150
+    assert activity.share_change_percent == 50
     stale = derive_position_activity([q1], ticker="EX", as_of=date(2025, 2, 14))
     assert disclosure_lag_decay(stale) < 0.1
 
 
 def test_provider_ingests_edgar_information_tables_end_to_end(tmp_path: Path) -> None:
     submissions = (FIXTURES / "renaissance_submissions.json").read_bytes()
+    archived_submissions = (FIXTURES / "renaissance_archived_submissions.json").read_bytes()
     index = (FIXTURES / "renaissance_index.json").read_bytes()
     table = (FIXTURES / "renaissance_information_table.xml").read_bytes()
     cover = (FIXTURES / "renaissance_cover.xml").read_bytes()
@@ -93,6 +116,8 @@ def test_provider_ingests_edgar_information_tables_end_to_end(tmp_path: Path) ->
     def transport(url: str, _headers: dict[str, str]) -> bytes:
         if url.endswith("submissions/CIK0001037389.json"):
             return submissions
+        if url.endswith("CIK0001037389-submissions-001.json"):
+            return archived_submissions
         if url.endswith("index.json"):
             return index
         if url.endswith("infotable.xml"):
@@ -101,9 +126,14 @@ def test_provider_ingests_edgar_information_tables_end_to_end(tmp_path: Path) ->
 
     provider = Renaissance13FEdgarProvider("SMCT test@example.com", tmp_path, transport=transport)
     rows = provider.renaissance_13f_holdings(lambda cusip: "EX" if cusip == "123456789" else None)
-    assert len(rows) == 2
+    assert len(rows) == 3
+    assert [row.filing_date for row in rows] == [
+        date(2023, 11, 14),
+        date(2024, 5, 15),
+        date(2024, 6, 1),
+    ]
     assert rows[0].amendment_type is AmendmentType.NONE
-    assert rows[1].amendment_type is AmendmentType.NEW_HOLDINGS
+    assert rows[-1].amendment_type is AmendmentType.NEW_HOLDINGS
     assert all(row.ticker == "EX" and row.shares == 1_500 for row in rows)
 
 

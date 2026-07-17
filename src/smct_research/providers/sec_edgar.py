@@ -151,27 +151,34 @@ class Renaissance13FEdgarProvider(SecEdgarProvider):
     renaissance_cik = "0001037389"
 
     def renaissance_13f_filings(self) -> list[dict[str, str]]:
-        recent = self.submissions(self.renaissance_cik).get("filings", {}).get("recent", {})
-        forms = recent.get("form", [])
-        accessions = recent.get("accessionNumber", [])
-        dates = recent.get("filingDate", [])
-        documents = recent.get("primaryDocument", [])
-        reports = recent.get("reportDate", [])
+        """Return 13F records from both current and archived SEC submissions files."""
+        submission = self.submissions(self.renaissance_cik)
+        records = [submission.get("filings", {}).get("recent", {})]
+        for archived in submission.get("filings", {}).get("files", []):
+            name = archived.get("name")
+            if name:
+                records.append(self._get_json(f"submissions/{name}", f"submissions/{name}"))
         filings: list[dict[str, str]] = []
-        for form, accession, filing_date, document, report_date in zip(
-            forms, accessions, dates, documents, reports, strict=True
-        ):
-            if form in {"13F-HR", "13F-HR/A"}:
-                filings.append(
-                    {
-                        "form": form,
-                        "accession_number": accession,
-                        "filing_date": filing_date,
-                        "primary_document": document,
-                        "reporting_quarter": report_date,
-                    }
-                )
-        return filings
+        for recent in records:
+            for form, accession, filing_date, document, report_date in zip(
+                recent.get("form", []),
+                recent.get("accessionNumber", []),
+                recent.get("filingDate", []),
+                recent.get("primaryDocument", []),
+                recent.get("reportDate", []),
+                strict=True,
+            ):
+                if form in {"13F-HR", "13F-HR/A"}:
+                    filings.append(
+                        {
+                            "form": form,
+                            "accession_number": accession,
+                            "filing_date": filing_date,
+                            "primary_document": document,
+                            "reporting_quarter": report_date,
+                        }
+                    )
+        return sorted(filings, key=lambda filing: filing["filing_date"])
 
     def renaissance_13f_holdings(
         self, ticker_for_cusip: Callable[[str], str | None] | None = None
