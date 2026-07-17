@@ -1,0 +1,1 @@
+{"tightening":{"liquidity":"contraction","policy":"tightening"},"restrictive_stable":{"liquidity":"contraction","policy":"restrictive_stable"},"easing":{"liquidity":"expansion","policy":"easing"},"liquidity_expansion":{"liquidity":"expansion","policy":"neutral"}}
