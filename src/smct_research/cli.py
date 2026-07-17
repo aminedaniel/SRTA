@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 
 import typer
@@ -17,7 +19,15 @@ from smct_research.signals.fed_regime import FederalReserveRegimeSignal
 from smct_research.signals.form4_cluster_buying import Form4ClusterBuyingSignal
 from smct_research.signals.reddit_awareness import RedditAwarenessSignal
 from smct_research.signals.renaissance_public_equity import RenaissancePublicEquityActivitySignal
+from smct_research.signals.reverse_dcf_expectations import ReverseDCFExpectationsSignal
 from smct_research.signals.valuation_compression import ValuationCompressionSignal
+from smct_research.valuation.reverse_dcf import (
+    DCFScenario,
+    ReverseDCFInputs,
+    sensitivity,
+    solve_reverse_dcf,
+    value_dcf,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -25,6 +35,7 @@ app = typer.Typer(no_args_is_help=True)
 def default_registry() -> SignalRegistry:
     registry = SignalRegistry()
     registry.register(ValuationCompressionSignal())
+    registry.register(ReverseDCFExpectationsSignal())
     registry.register(RedditAwarenessSignal())
     registry.register(CongressionalPurchaseSignal())
     registry.register(Form4ClusterBuyingSignal())
@@ -80,7 +91,7 @@ def screen(
     output_json: Path | None = typer.Option(None),  # noqa: B008
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     include_ineligible: bool = typer.Option(False),
-    config: Path | None = typer.Option(None),  # noqa: B008
+    config: Path | None = typer.Option(None),  # noqa: B008  # noqa: B008
 ) -> None:
     """Rank an offline universe using one JSON feature snapshot per ticker."""
     policy_data: dict[str, object] = {}
@@ -120,6 +131,123 @@ def screen(
         score = "unavailable" if item.composite_score is None else f"{item.composite_score:.1f}"
         rank = "-" if item.rank is None else str(item.rank)
         typer.echo(f"{rank:>3}  {item.ticker:<8} {score:>11}  {item.company_name}")
+
+
+def _load_reverse_dcf_config(path: Path) -> dict[str, dict[str, object]]:
+    """Load JSON or the bundled small YAML-compatible scenario mapping."""
+    text = path.read_text()
+    if path.suffix.lower() == ".json":
+        raw: object = json.loads(text)
+    else:
+        yaml_values: dict[str, object] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            if value.strip().startswith("{"):
+                normalized = re.sub(r"([A-Za-z_][A-Za-z0-9_]*):", r'"\1":', value.strip())
+                yaml_values[name] = json.loads(normalized)
+        raw = yaml_values
+    if isinstance(raw, dict) and "scenarios" in raw:
+        raw = raw["scenarios"]
+    if not isinstance(raw, dict):
+        raise ValueError("reverse DCF config must be a scenario mapping")
+    return {str(name): dict(value) for name, value in raw.items() if isinstance(value, dict)}
+
+
+def _merged_scenarios(payload: dict[str, object], config: Path | None) -> list[DCFScenario]:
+    if config is not None:
+        config_data = _load_reverse_dcf_config(config)
+    else:
+        packaged = files("smct_research.config").joinpath("reverse_dcf.yaml")
+        # importlib.resources resolves installed package data deterministically.
+        config_data = _load_reverse_dcf_config(Path(str(packaged)))
+    explicit = payload.get("scenarios", [])
+    if isinstance(explicit, dict):
+        explicit = [
+            {"name": name, **value} for name, value in explicit.items() if isinstance(value, dict)
+        ]
+    merged = {name: {"name": name, **values} for name, values in config_data.items()}
+    for value in explicit if isinstance(explicit, list) else []:
+        if not isinstance(value, dict):
+            raise ValueError("scenarios must be objects")
+        name = str(value.get("name", "base"))
+        merged[name] = {**merged.get(name, {"name": name}), **value}
+    return [DCFScenario.model_validate(merged[name]) for name in sorted(merged)]
+
+
+@app.command()
+def dcf(
+    input_file: Path,
+    as_of: str | None = typer.Option(None),
+    config: Path | None = typer.Option(None),  # noqa: B008
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+    sensitivity_output: bool = typer.Option(False, "--sensitivity"),
+    scenario: str = typer.Option("all"),
+) -> None:
+    """Run an offline deterministic scenario and reverse-DCF valuation."""
+    payload = json.loads(input_file.read_text())
+    input_data = payload.get("inputs", payload)
+    if not isinstance(input_data, dict):
+        raise typer.BadParameter("inputs must be an object")
+    if as_of:
+        try:
+            overridden = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise typer.BadParameter("--as-of must be an ISO-8601 timestamp") from error
+        input_data = {**input_data, "valuation_date": overridden}
+    try:
+        inputs = ReverseDCFInputs.model_validate(input_data)
+        scenarios = _merged_scenarios(payload, config)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    if not scenarios:
+        raise typer.BadParameter("input must include scenarios")
+    selected = (
+        scenarios if scenario == "all" else [item for item in scenarios if item.name == scenario]
+    )
+    if not selected:
+        raise typer.BadParameter("--scenario must match an input scenario")
+    output = []
+    for item in selected:
+        valuation = value_dcf(inputs, item)
+        record: dict[str, object] = {
+            "valuation": valuation.model_dump(mode="json"),
+            "reverse": solve_reverse_dcf(inputs, item).model_dump(mode="json"),
+        }
+        if sensitivity_output:
+            try:
+                record["sensitivity"] = [
+                    x.model_dump(mode="json")
+                    for x in sensitivity(
+                        inputs,
+                        item,
+                        [item.discount_rate - 0.01, item.discount_rate, item.discount_rate + 0.01],
+                        [
+                            item.terminal_growth_rate - 0.005,
+                            item.terminal_growth_rate,
+                            item.terminal_growth_rate + 0.005,
+                        ],
+                        [
+                            item.terminal_fcf_margin - 0.05,
+                            item.terminal_fcf_margin,
+                            item.terminal_fcf_margin + 0.05,
+                        ],
+                        [
+                            item.initial_revenue_growth - 0.05,
+                            item.initial_revenue_growth,
+                            item.initial_revenue_growth + 0.05,
+                        ],
+                    )
+                ]
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from error
+        output.append(record)
+    rendered = json.dumps(output, indent=2)
+    if output_json:
+        output_json.write_text(rendered + "\n")
+    typer.echo(rendered)
 
 
 if __name__ == "__main__":

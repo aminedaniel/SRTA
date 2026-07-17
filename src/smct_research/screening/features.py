@@ -6,6 +6,7 @@ from datetime import datetime
 
 from smct_research.core.models import FeatureSnapshot, normalize_utc
 from smct_research.screening.models import FeatureAssemblyInput
+from smct_research.valuation.reverse_dcf import DCFScenario, ReverseDCFInputs
 
 
 class FeatureSnapshotAssembler:
@@ -24,4 +25,69 @@ class FeatureSnapshotAssembler:
             values=evidence.values,
             sources=evidence.sources,
             source_as_of=evidence.source_as_of,
+        )
+
+    def add_reverse_dcf_features(
+        self,
+        evidence: FeatureAssemblyInput,
+        inputs: ReverseDCFInputs,
+        scenarios: list[DCFScenario],
+    ) -> FeatureAssemblyInput:
+        """Add deterministic valuation features while preserving upstream evidence provenance."""
+        from smct_research.valuation.reverse_dcf import solve_reverse_dcf, value_dcf
+
+        values = dict(evidence.values)
+        sources = dict(evidence.sources)
+        source_as_of = dict(evidence.source_as_of)
+        for field, timestamp in inputs.available_at.items():
+            source_as_of[f"dcf:{field}"] = timestamp
+            sources[f"dcf:{field}"] = inputs.provenance.get(field, "unspecified")
+        by_name = {scenario.name: value_dcf(inputs, scenario) for scenario in scenarios}
+        for name, result in by_name.items():
+            if result.valid:
+                values[f"dcf_{name}_value_per_share"] = result.diluted_value_per_share
+        base = by_name.get("base")
+        base_scenario = next((scenario for scenario in scenarios if scenario.name == "base"), None)
+        if base and base.valid and base_scenario:
+            reverse = solve_reverse_dcf(inputs, base_scenario)
+            input_age_days = max(
+                (inputs.valuation_date - timestamp).days
+                for timestamp in inputs.available_at.values()
+            )
+            annual_dilution = (
+                base_scenario.annual_dilution
+                if base_scenario.annual_dilution is not None
+                else inputs.expected_annual_dilution
+            )
+            age_penalty = min(0.40, max(0, input_age_days - 30) / 365)
+            dilution_penalty = min(0.30, max(0.0, annual_dilution - 0.02) * 5)
+            quality = max(
+                0.0,
+                min(
+                    1.0,
+                    1.0
+                    - max(0.0, base.terminal_value_share - 0.65)
+                    - 0.25 * len(reverse.diagnostics)
+                    - age_penalty
+                    - dilution_penalty,
+                ),
+            )
+            values.update(
+                {
+                    "dcf_base_upside_percent": base.upside_downside_percent,
+                    "dcf_terminal_value_share": base.terminal_value_share,
+                    "reverse_dcf_implied_revenue_cagr": reverse.implied_revenue_cagr,
+                    "reverse_dcf_implied_terminal_fcf_margin": reverse.implied_terminal_fcf_margin,
+                    "reverse_dcf_growth_gap": reverse.growth_gap,
+                    "reverse_dcf_margin_gap": reverse.margin_gap,
+                    "dcf_model_quality_score": quality,
+                    "dcf_annual_dilution": annual_dilution,
+                    "dcf_input_age_days": input_age_days,
+                }
+            )
+            conservative = by_name.get("conservative")
+            if conservative and conservative.valid:
+                values["dcf_conservative_downside_percent"] = conservative.upside_downside_percent
+        return evidence.model_copy(
+            update={"values": values, "sources": sources, "source_as_of": source_as_of}
         )
