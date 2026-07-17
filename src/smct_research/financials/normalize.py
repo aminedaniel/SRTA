@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -52,7 +51,7 @@ def normalize_company_facts(
                     observation = _observation(metric, item, unit, cik, retrieved)
                     if observation is not None:
                         observations.append(observation)
-    return _mark_superseded(observations)
+    return observations
 
 
 def _observation(
@@ -102,27 +101,11 @@ def _observation(
     )
 
 
-def _mark_superseded(observations: list[FinancialObservation]) -> list[FinancialObservation]:
-    groups: dict[tuple[str, date, str, date | None], list[FinancialObservation]] = defaultdict(list)
-    for observation in observations:
-        groups[
-            (observation.metric, observation.period_end, observation.unit, observation.period_start)
-        ].append(observation)
-    for group in groups.values():
-        amendments = [item for item in group if item.filing.is_amendment]
-        if amendments:
-            latest = max(amendments, key=lambda item: item.filing.filed_at)
-            for item in group:
-                if item is not latest and item.filing.filed_at <= latest.filing.filed_at:
-                    item.filing.is_superseded = True
-    return observations
-
-
 def derive_features(
     observations: list[FinancialObservation], as_of: date
 ) -> dict[str, FeatureValue]:
     """Return only values public by ``as_of``; amendments remain distinct in storage."""
-    usable = [o for o in observations if o.available_on <= as_of and not o.filing.is_superseded]
+    usable = [o for o in observations if o.available_on <= as_of]
     latest: dict[str, FinancialObservation] = {}
     for observation in usable:
         current = latest.get(observation.metric)

@@ -12,10 +12,20 @@ class RevisionStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SeriesDefinition(BaseModel, frozen=True):
+    """Immutable metadata required to safely normalize a macroeconomic series."""
+
+    unit: str
+    frequency: str
+    release_source: str
+    revisions_occur: bool
+
+
 class MacroObservation(BaseModel):
     series_id: str
     observation_date: date
-    available_on: date
+    publication_date: date | None
+    first_available_on: date | None
     vintage_date: date | None = None
     retrieved_at: datetime
     value: float
@@ -24,6 +34,17 @@ class MacroObservation(BaseModel):
     revision_status: RevisionStatus = RevisionStatus.UNKNOWN
     frequency: str
     provenance_url: str
+    point_in_time_eligible: bool = True
+
+    @property
+    def available_on(self) -> date | None:
+        """Compatibility alias for the first public availability date."""
+        return self.first_available_on
+
+    @property
+    def point_in_time_available_on(self) -> date | None:
+        """Availability of this specific vintage, not merely the original release."""
+        return self.vintage_date or self.first_available_on
 
 
 class FedBalanceSheetRelease(BaseModel):
