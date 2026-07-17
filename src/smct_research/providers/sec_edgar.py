@@ -12,6 +12,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from smct_research.form4 import Form4Transaction, parse_form4_xml
 from smct_research.institutional_13f import (
     Form13FHolding,
     parse_amendment_type,
@@ -138,6 +139,56 @@ class SecEdgarProvider(DataProvider):
         if not isinstance(data, dict):
             raise ProviderResponseError(f"Cached SEC JSON must be an object: {path}")
         return data
+
+    def form4_filings(self, issuer_cik: str | int) -> list[dict[str, str]]:
+        """List issuer Form 4 and Form 4/A filings from SEC submissions metadata."""
+        submissions = self.submissions(issuer_cik)
+        recent = submissions.get("filings", {}).get("recent", {})
+        return [
+            {
+                "form": form,
+                "accession_number": accession,
+                "filing_date": filed,
+                "primary_document": document,
+            }
+            for form, accession, filed, document in zip(
+                recent.get("form", []),
+                recent.get("accessionNumber", []),
+                recent.get("filingDate", []),
+                recent.get("primaryDocument", []),
+                strict=True,
+            )
+            if form in {"4", "4/A"}
+        ]
+
+    def form4_transactions(self, issuer_cik: str | int) -> list[Form4Transaction]:
+        """Download and normalize issuer Form 4 documents, including amendments."""
+
+        records: list[Form4Transaction] = []
+        cik = str(int(str(issuer_cik)))
+        for filing in self.form4_filings(issuer_cik):
+            accession = filing["accession_number"].replace("-", "")
+            document = filing["primary_document"]
+            cache_path = self.cache_dir / "form4" / accession / document
+            if cache_path.exists():
+                payload = cache_path.read_bytes()
+            else:
+                self.rate_limiter.acquire()
+                payload = self.transport(
+                    f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}",
+                    {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"},
+                )
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(payload)
+            records.extend(
+                parse_form4_xml(
+                    payload,
+                    filing_date=date.fromisoformat(filing["filing_date"]),
+                    accession_number=filing["accession_number"],
+                    is_amendment=filing["form"] == "4/A",
+                )
+            )
+        return records
 
 
 class Renaissance13FEdgarProvider(SecEdgarProvider):

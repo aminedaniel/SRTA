@@ -12,6 +12,7 @@ The initial implementation includes:
 - valuation-compression signal
 - Reddit awareness/crowding signal
 - congressional disclosed-purchasing signal
+- SEC Form 4 open-market cluster-buying corroboration signal
 - Renaissance Public Equity Activity (delayed SEC Form 13F corroboration)
 - composite research-priority scorer
 - CLI and tests
@@ -36,3 +37,12 @@ Feature snapshots can be exported to Parquet. Set an identifiable SEC user agent
 for example in PowerShell: `$env:SMCT_SEC_USER_AGENT = "SMCT Research you@example.com"`.
 No network is required for the test suite; tests use local fixtures. Reddit remains optional and is
 disabled by default in any ingestion workflow.
+
+
+## Form 4 research evidence
+
+The Form 4 pipeline ingests public `4` and `4/A` filings, retains only filed open-market
+purchases (transaction code `P`, acquired shares, positive share count and price), and applies
+the filing date as its point-in-time availability boundary. It deduplicates amended transactions
+and uses insider purchase clusters only as **corroborating research evidence—not standalone trade
+instructions**.

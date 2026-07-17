@@ -16,7 +16,7 @@ class ResearchScore(BaseModel):
 
 class CompositeResearchScorer:
     def __init__(self, weights: dict[str, float] | None = None) -> None:
-        self.weights = weights or {"A1": 1.25, "F1": 0.75, "E2": 0.90, "I1": 0.25}
+        self.weights = weights or {"A1": 1.25, "F1": 0.75, "E2": 0.90, "E3": 0.85, "I1": 0.25}
 
     def score(self, results: list[SignalResult]) -> ResearchScore:
         if not results:
