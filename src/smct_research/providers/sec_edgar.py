@@ -143,23 +143,32 @@ class SecEdgarProvider(DataProvider):
     def form4_filings(self, issuer_cik: str | int) -> list[dict[str, str]]:
         """List issuer Form 4 and Form 4/A filings from SEC submissions metadata."""
         submissions = self.submissions(issuer_cik)
-        recent = submissions.get("filings", {}).get("recent", {})
-        return [
-            {
-                "form": form,
-                "accession_number": accession,
-                "filing_date": filed,
-                "primary_document": document,
-            }
+        histories = [submissions.get("filings", {}).get("recent", {})]
+        for archived in submissions.get("filings", {}).get("files", []):
+            name = archived.get("name")
+            if name:
+                histories.append(self._get_json(f"submissions/{name}", f"submissions/{name}"))
+        filings: list[dict[str, str]] = []
+        for history in histories:
             for form, accession, filed, document in zip(
-                recent.get("form", []),
-                recent.get("accessionNumber", []),
-                recent.get("filingDate", []),
-                recent.get("primaryDocument", []),
+                history.get("form", []),
+                history.get("accessionNumber", []),
+                history.get("filingDate", []),
+                history.get("primaryDocument", []),
                 strict=True,
-            )
-            if form in {"4", "4/A"}
-        ]
+            ):
+                if form in {"4", "4/A"}:
+                    filings.append(
+                        {
+                            "form": form,
+                            "accession_number": accession,
+                            "filing_date": filed,
+                            "primary_document": document,
+                        }
+                    )
+        return sorted(
+            filings, key=lambda filing: (filing["filing_date"], filing["accession_number"])
+        )
 
     def form4_transactions(self, issuer_cik: str | int) -> list[Form4Transaction]:
         """Download and normalize issuer Form 4 documents, including amendments."""

@@ -19,8 +19,8 @@ class Form4ClusterBuyingSignal(ResearchSignal):
     name = "Form 4 Cluster Buying"
     required_features = (
         "form4_unique_insiders_buying_7d",
-        "form4_aggregate_purchase_value_30d",
-        "form4_purchase_value_market_cap_ratio_30d",
+        "form4_aggregate_purchase_value_7d",
+        "form4_purchase_value_market_cap_ratio_7d",
         "form4_largest_individual_purchase_30d",
         "form4_officer_director_10pct_participants_30d",
         "form4_repeated_purchase_insiders_30d",
@@ -31,8 +31,8 @@ class Form4ClusterBuyingSignal(ResearchSignal):
     def evaluate(self, snapshot: FeatureSnapshot) -> SignalResult:
         self.validate(snapshot)
         buyers = max(0.0, snapshot.require_float("form4_unique_insiders_buying_7d"))
-        value = max(0.0, snapshot.require_float("form4_aggregate_purchase_value_30d"))
-        cap_ratio = max(0.0, snapshot.require_float("form4_purchase_value_market_cap_ratio_30d"))
+        value = max(0.0, snapshot.require_float("form4_aggregate_purchase_value_7d"))
+        cap_ratio = max(0.0, snapshot.require_float("form4_purchase_value_market_cap_ratio_7d"))
         largest = max(0.0, snapshot.require_float("form4_largest_individual_purchase_30d"))
         leadership = max(
             0.0, snapshot.require_float("form4_officer_director_10pct_participants_30d")
@@ -103,7 +103,7 @@ class Form4ClusterBuyingSignal(ResearchSignal):
             thesis=thesis,
             evidence=[
                 f"Unique qualifying buyers in seven days: {buyers:.0f}.",
-                f"30-day public purchase value: ${value:,.0f} "
+                f"7-day triggered-cluster purchase value: ${value:,.0f} "
                 f"({cap_ratio:.3%} of market capitalization).",
                 f"Newest qualifying filing age: {age:.0f} days.",
             ],
@@ -114,7 +114,7 @@ class Form4ClusterBuyingSignal(ResearchSignal):
             ],
             metadata={
                 "unique_buyers_7d": buyers,
-                "purchase_value_30d": value,
+                "triggered_purchase_value_7d": value,
                 "market_cap_ratio": cap_ratio,
                 "filing_age_days": age,
             },

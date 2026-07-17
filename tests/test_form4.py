@@ -23,6 +23,8 @@ def row(
         issuer_cik="123",
         ticker="acme",
         insider_name=name,
+        reporting_owner_cik=f"owner-{name}",
+        report_date=transaction_date,
         insider_role="director",
         is_director=True,
         transaction_date=transaction_date,
@@ -47,6 +49,7 @@ def test_parser_preserves_purchase_and_excludes_exercise_and_grant() -> None:
     assert len(records) == 1
     assert records[0].ticker == "ACME" and records[0].transaction_value == 25_500
     assert records[0].is_officer and records[0].is_director and records[0].ownership_nature == "D"
+    assert records[0].reporting_owner_cik == "789"
 
 
 def test_amendments_and_point_in_time_deduplication() -> None:
@@ -73,8 +76,8 @@ def test_features_cluster_boundaries_and_stale_filings() -> None:
 def test_signal_has_no_score_for_isolated_and_caps_score() -> None:
     values = {
         "form4_unique_insiders_buying_7d": 3,
-        "form4_aggregate_purchase_value_30d": 10_000_000,
-        "form4_purchase_value_market_cap_ratio_30d": 0.1,
+        "form4_aggregate_purchase_value_7d": 10_000_000,
+        "form4_purchase_value_market_cap_ratio_7d": 0.1,
         "form4_largest_individual_purchase_30d": 5_000_000,
         "form4_officer_director_10pct_participants_30d": 3,
         "form4_repeated_purchase_insiders_30d": 2,
@@ -87,4 +90,33 @@ def test_signal_has_no_score_for_isolated_and_caps_score() -> None:
     assert (
         Form4ClusterBuyingSignal().evaluate(FeatureSnapshot(ticker="ACME", values=values)).score
         == 0
+    )
+
+
+def test_amendment_replaces_the_entire_original_filing_and_events_not_rows() -> None:
+    original_a = row("Ada", date(2026, 7, 10), date(2026, 7, 11), value=50_000)
+    original_b = row("Ada", date(2026, 7, 9), date(2026, 7, 11), value=75_000)
+    amended = row("Ada", date(2026, 7, 10), date(2026, 7, 12), value=60_000, amendment=True)
+    amended.report_date = original_a.report_date
+    original_b.report_date = original_a.report_date
+    visible = deduplicate_form4_transactions([original_a, original_b, amended], date(2026, 7, 12))
+    assert [transaction.transaction_value for transaction in visible] == [60_000]
+    duplicate_ownership_row = amended.model_copy(update={"ownership_nature": "I"})
+    features = form4_rolling_features(
+        [amended, duplicate_ownership_row], as_of=date(2026, 7, 12), market_cap_usd=1_000_000
+    )
+    assert features["form4_repeated_purchase_insiders_30d"] == 0
+
+
+def test_joint_filing_is_excluded_conservatively() -> None:
+    payload = Path("tests/fixtures/sec/form4_purchase.xml").read_text()
+    extra_owner = (
+        "</reportingOwner><reportingOwner><reportingOwnerId>"
+        "<rptOwnerCik>2</rptOwnerCik><rptOwnerName>Joint Owner</rptOwnerName>"
+        "</reportingOwnerId></reportingOwner><nonDerivativeTable>"
+    )
+    joint = payload.replace("</reportingOwner><nonDerivativeTable>", extra_owner)
+    assert (
+        parse_form4_xml(joint.encode(), filing_date=date(2026, 7, 11), accession_number="joint")
+        == []
     )
