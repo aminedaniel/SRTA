@@ -57,9 +57,9 @@ def test_missing_package_history_remains_missing_but_repo_evidence_scores() -> N
 
 def test_mapping_effective_dates_and_ambiguous_mapping_rejection() -> None:
     repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
-    maps = load_repository_mappings(EX / "ambiguous_mappings.json", "ACME")
-    with pytest.raises(ValueError, match="ambiguous repository mapping"):
-        calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [])
+    with pytest.raises(ProviderResponseError, match="conflicting logical"):
+        load_repository_mappings(EX / "ambiguous_mappings.json", "ACME")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
     old = AS_OF.replace(year=2024)
     result = calculate_developer_ecosystem_features(repos, maps[:1], "ACME", old, [])
     assert result.features["developer_active_contributors_90d"] is None
@@ -167,3 +167,198 @@ def test_cli_json_csv_ambiguous_and_optional_package(tmp_path: Path) -> None:
     )
     assert bad.exit_code != 0
     assert "Traceback" not in bad.output
+
+
+def test_missingness_true_zero_and_grain_policy() -> None:
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+    result = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [])
+    assert result.features["developer_active_contributors_30d"] is None
+    assert result.features["developer_commit_velocity_180d"] is None
+    assert "missing current repository window: 30d" in result.diagnostics
+    assert "missing current repository window: 180d" in result.diagnostics
+
+    zero = repos[1].model_copy(
+        update={
+            "provider_record_id": "zero-current",
+            "repository_id": "zero",
+            "owner": "acme",
+            "name": "zero",
+            "commit_count": 0,
+            "active_contributor_count": 0,
+            "new_contributor_count": 0,
+            "returning_contributor_count": 0,
+            "external_contributor_count": 0,
+            "contributors": [],
+        }
+    )
+    zero_map = maps[0].model_copy(update={"owner": "acme", "name": "zero", "organization": None})
+    zero_result = calculate_developer_ecosystem_features([zero], [zero_map], "ACME", AS_OF, [])
+    assert zero_result.features["developer_active_contributors_90d"] == 0
+    assert zero_result.features["developer_commit_velocity_90d_raw"] == 0
+    assert zero_result.features["developer_active_contributor_growth_90d"] is None
+
+
+def test_missing_prior_and_package_download_missingness() -> None:
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+    current_only = [item for item in repos if item.provider_record_id == "acme-core-current"]
+    result = calculate_developer_ecosystem_features(current_only, maps, "ACME", AS_OF, [])
+    assert result.features["developer_active_contributors_90d"] is not None
+    assert result.features["developer_active_contributor_growth_90d"] is None
+
+    pkgs = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")
+    missing_download = pkgs[1].model_copy(
+        update={"provider_record_id": "missing-download", "download_count": None}
+    )
+    missing_result = calculate_developer_ecosystem_features(
+        repos, maps, "ACME", AS_OF, [missing_download]
+    )
+    assert missing_result.features["developer_package_download_growth_90d"] is None
+    zero_current = pkgs[1].model_copy(
+        update={"provider_record_id": "zero-download", "download_count": 0}
+    )
+    zero_prior = pkgs[0].model_copy(
+        update={"provider_record_id": "zero-download-prior", "download_count": 0}
+    )
+    zero_result = calculate_developer_ecosystem_features(
+        repos, maps, "ACME", AS_OF, [zero_current, zero_prior]
+    )
+    assert zero_result.features["developer_package_download_growth_90d"] == 0
+
+
+def test_mapping_specificity_exclusions_and_repository_status() -> None:
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    core = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    org_include = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    repo_exclude = org_include.model_copy(
+        update={"organization": None, "owner": "acme", "name": "core", "include": False}
+    )
+    excluded = calculate_developer_ecosystem_features(
+        [core], [org_include, repo_exclude], "ACME", AS_OF, []
+    )
+    assert excluded.features["developer_active_contributors_90d"] is None
+    assert not excluded.provenance
+    assert "explicitly excluded repository" in " ".join(excluded.diagnostics)
+
+    org_exclude = org_include.model_copy(update={"include": False})
+    repo_include = org_include.model_copy(
+        update={"organization": None, "owner": "acme", "name": "core"}
+    )
+    still_excluded = calculate_developer_ecosystem_features(
+        [core], [org_exclude, repo_include], "ACME", AS_OF, []
+    )
+    assert still_excluded.features["developer_active_contributors_90d"] is None
+
+    archived = core.model_copy(update={"provider_record_id": "archived", "is_archived": True})
+    fork = core.model_copy(
+        update={
+            "provider_record_id": "fork",
+            "repository_id": "fork",
+            "name": "fork",
+            "is_fork": True,
+        }
+    )
+    mirror = core.model_copy(
+        update={
+            "provider_record_id": "mirror",
+            "repository_id": "mirror",
+            "name": "mirror",
+            "is_mirror": True,
+        }
+    )
+    status = calculate_developer_ecosystem_features(
+        [archived, fork, mirror], [org_include], "ACME", AS_OF, []
+    )
+    joined = " ".join(status.diagnostics)
+    assert "archived repository excluded" in joined
+    assert "fork repository excluded" in joined
+    assert "mirror repository excluded" in joined
+
+
+def test_package_mapping_and_provider_scoped_provenance() -> None:
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+    pkgs = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")
+    result = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, pkgs)
+    assert any(key.startswith("developer:repository:github:r1:") for key in result.provenance)
+    assert any(key.startswith("developer:package:pypi:pypi:acme-sdk:") for key in result.provenance)
+    assert set(result.provenance) == set(result.source_as_of)
+    assert "future" not in " ".join(result.provenance)
+
+    unmapped = pkgs[1].model_copy(
+        update={"provider_record_id": "unmapped-pkg", "package_name": "other"}
+    )
+    unmapped_result = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [unmapped])
+    assert "unmapped package excluded" in " ".join(unmapped_result.diagnostics)
+    assert not any("unmapped-pkg" in key for key in unmapped_result.provenance)
+    wrong_repo = pkgs[1].model_copy(
+        update={"provider_record_id": "wrong-repo", "repository_id": "not-selected"}
+    )
+    wrong = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [wrong_repo])
+    assert "package linked to excluded or wrong repository" in " ".join(wrong.diagnostics)
+
+
+def test_custom_config_bot_noise_and_star_spike(tmp_path: Path) -> None:
+    from smct_research.developer_ecosystem.config import (
+        DeveloperEcosystemConfig,
+        load_developer_ecosystem_config,
+    )
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+    cfg = DeveloperEcosystemConfig.model_validate(
+        {
+            "bot_filtering": {"allowlist_logins": ["renovate"], "denylist_logins": ["bob"]},
+            "activity_thresholds": {"meaningful_activity_events_90d": 200},
+            "star_spike_diagnostics": {
+                "spike_growth_threshold": 0.1,
+                "corroborating_growth_threshold": 99,
+            },
+        }
+    )
+    result = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [], config=cfg)
+    assert result.features["developer_ecosystem_breadth"] == 0
+    assert result.features["developer_bot_activity_share"] > 0.1
+    assert "star spike lacks" in " ".join(result.diagnostics)
+
+    noisy = repos[1].model_copy(
+        update={
+            "provider_record_id": "noisy",
+            "generated_activity_share": 0.6,
+            "mass_formatting_share": 0.6,
+        }
+    )
+    noisy_result = calculate_developer_ecosystem_features(
+        [noisy], maps, "ACME", AS_OF, [], config=cfg
+    )
+    assert noisy_result.features["developer_commit_velocity_90d_raw"] > 0
+    assert noisy_result.features["developer_commit_velocity_90d_adjusted"] == 0
+
+    config_file = tmp_path / "dev.yaml"
+    config_file.write_text(
+        "lookback_windows_days: [90]\nactivity_thresholds:\n  meaningful_activity_events_90d: 999\n"
+    )
+    assert load_developer_ecosystem_config(config_file).lookback_windows_days == [90]
+
+
+def test_provider_duplicate_conflict_and_model_validation(tmp_path: Path) -> None:
+    one = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")[0]
+    duplicate_file = tmp_path / "dupes.json"
+    duplicate_file.write_text("[" + one.model_dump_json() + "," + one.model_dump_json() + "]")
+    assert (
+        len(OfflineDeveloperHistoryProvider(duplicate_file).fetch_repository_history("ACME")) == 1
+    )
+
+    conflict = one.model_copy(update={"commit_count": one.commit_count + 1})
+    conflict_file = tmp_path / "conflict.json"
+    conflict_file.write_text("[" + one.model_dump_json() + "," + conflict.model_dump_json() + "]")
+    with pytest.raises(ProviderResponseError, match="conflicting immutable"):
+        OfflineDeveloperHistoryProvider(conflict_file).fetch_repository_history("ACME")
+
+    invalid_file = tmp_path / "invalid.json"
+    invalid = one.model_dump(mode="json")
+    invalid["provider_record_id"] = ""
+    invalid_file.write_text("[" + __import__("json").dumps(invalid) + "]")
+    with pytest.raises(ProviderResponseError, match="invalid repository observation"):
+        OfflineDeveloperHistoryProvider(invalid_file).fetch_repository_history("ACME")

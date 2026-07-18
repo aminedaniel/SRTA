@@ -1,3 +1,7 @@
+from smct_research.developer_ecosystem.config import (
+    DeveloperEcosystemConfig,
+    load_developer_ecosystem_config,
+)
 from smct_research.developer_ecosystem.features import (
     attach_to_snapshot,
     calculate_developer_ecosystem_features,
@@ -15,6 +19,7 @@ from smct_research.developer_ecosystem.providers import (
 )
 
 __all__ = [
+    "DeveloperEcosystemConfig",
     "DeveloperEcosystemFeatures",
     "OfflineDeveloperHistoryProvider",
     "OfflinePackageHistoryProvider",
@@ -23,5 +28,6 @@ __all__ = [
     "RepositoryObservation",
     "attach_to_snapshot",
     "calculate_developer_ecosystem_features",
+    "load_developer_ecosystem_config",
     "load_repository_mappings",
 ]

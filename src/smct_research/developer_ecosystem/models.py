@@ -32,9 +32,9 @@ class PackageEcosystem(StrEnum):
 
 class RepositoryIdentity(BaseModel, frozen=True):
     provider: str = "github"
-    owner: str
-    name: str
-    repository_id: str
+    owner: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    repository_id: str = Field(min_length=1)
     source_identifier: str | None = None
     company_ticker: str
     is_first_party: bool = True
@@ -103,10 +103,14 @@ class StargazerForkObservation(BaseModel, frozen=True):
 
 class RepositoryObservation(BaseModel, frozen=True):
     provider: str = "github"
-    provider_record_id: str
-    repository_id: str
-    owner: str
-    name: str
+    provider_record_id: str = Field(min_length=1)
+    repository_id: str = Field(min_length=1)
+    owner: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    is_archived: bool = False
+    is_fork: bool = False
+    is_mirror: bool = False
+    include_fork: bool = False
     company_ticker: str
     commit_count: int = Field(ge=0)
     active_contributor_count: int = Field(ge=0)
@@ -133,7 +137,7 @@ class RepositoryObservation(BaseModel, frozen=True):
     observation_window_end: datetime
     retrieved_at: datetime | None = None
     available_at: datetime
-    source_provenance: str
+    source_provenance: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def normalize(self) -> RepositoryObservation:
@@ -142,8 +146,18 @@ class RepositoryObservation(BaseModel, frozen=True):
             object.__setattr__(self, field, normalize_utc(getattr(self, field)))
         if self.retrieved_at is not None:
             object.__setattr__(self, "retrieved_at", normalize_utc(self.retrieved_at))
-        if self.observation_window_end < self.observation_window_start:
+        object.__setattr__(self, "provider", self.provider.strip().lower())
+        object.__setattr__(self, "owner", self.owner.strip())
+        object.__setattr__(self, "name", self.name.strip())
+        if self.observation_window_end <= self.observation_window_start:
             raise ValueError("observation window end must be after start")
+        if (
+            self.new_contributor_count + self.returning_contributor_count
+            > self.active_contributor_count
+        ):
+            raise ValueError("new plus returning contributors cannot exceed active contributors")
+        if self.external_contributor_count > self.active_contributor_count:
+            raise ValueError("external contributors cannot exceed active contributors")
         return self
 
     @property
@@ -153,9 +167,9 @@ class RepositoryObservation(BaseModel, frozen=True):
 
 class PackageObservation(BaseModel, frozen=True):
     provider: str
-    provider_record_id: str
+    provider_record_id: str = Field(min_length=1)
     ecosystem: PackageEcosystem
-    package_name: str
+    package_name: str = Field(min_length=1)
     company_ticker: str
     repository_id: str | None = None
     repository_owner: str | None = None
@@ -167,7 +181,7 @@ class PackageObservation(BaseModel, frozen=True):
     observation_window_start: datetime
     observation_window_end: datetime
     available_at: datetime
-    source_identifier: str
+    source_identifier: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def normalize(self) -> PackageObservation:
@@ -176,6 +190,9 @@ class PackageObservation(BaseModel, frozen=True):
             object.__setattr__(self, field, normalize_utc(getattr(self, field)))
         if self.latest_release_at is not None:
             object.__setattr__(self, "latest_release_at", normalize_utc(self.latest_release_at))
+        if self.observation_window_end <= self.observation_window_start:
+            raise ValueError("observation window end must be after start")
+        object.__setattr__(self, "provider", self.provider.strip().lower())
         return self
 
 
@@ -202,8 +219,13 @@ class RepositoryMapping(BaseModel, frozen=True):
         object.__setattr__(self, "known_at", normalize_utc(self.known_at))
         if self.effective_to is not None:
             object.__setattr__(self, "effective_to", normalize_utc(self.effective_to))
+        object.__setattr__(self, "provider", self.provider.strip().lower())
         if self.name and not self.owner:
             raise ValueError("repository name mappings require an owner")
+        if not any((self.repository_id, self.name, self.organization, self.package_names)):
+            raise ValueError("mapping requires repository, organization, or package selector")
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to cannot be before effective_from")
         return self
 
     def is_effective(self, as_of: datetime) -> bool:

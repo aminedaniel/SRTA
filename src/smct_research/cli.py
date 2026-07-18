@@ -17,6 +17,7 @@ from smct_research.developer_ecosystem import (
     calculate_developer_ecosystem_features,
     load_repository_mappings,
 )
+from smct_research.developer_ecosystem.config import load_developer_ecosystem_config
 from smct_research.estimates.models import EstimateBasis, EstimateMetric, EstimatePeriod
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
@@ -331,6 +332,7 @@ def developer_velocity(
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     include_repository: list[str] | None = typer.Option(None),  # noqa: B008
     exclude_repository: list[str] | None = typer.Option(None),  # noqa: B008
+    config: Path | None = typer.Option(None),  # noqa: B008
 ) -> None:
     """Calculate deterministic offline developer ecosystem momentum features."""
     try:
@@ -361,8 +363,9 @@ def developer_velocity(
             else []
         )
         mappings = load_repository_mappings(mapping_file, ticker)
+        dev_config = load_developer_ecosystem_config(config)
         result = calculate_developer_ecosystem_features(
-            repos, mappings, ticker, timestamp, packages
+            repos, mappings, ticker, timestamp, packages, config=dev_config
         )
     except (ProviderResponseError, ValueError, OSError, TypeError) as error:
         raise typer.BadParameter(str(error)) from error
