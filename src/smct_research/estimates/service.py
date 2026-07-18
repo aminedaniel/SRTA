@@ -54,6 +54,9 @@ def calculate_features(
     as_of: datetime,
     period_end: date | None = None,
     tolerance_days: int = 7,
+    provider: str | None = None,
+    basis=None,
+    period_type=None,
 ) -> EstimateRevisionFeatures:
     as_of = normalize_utc(as_of)
     eligible = [
@@ -61,12 +64,23 @@ def calculate_features(
         for x in records
         if x.ticker == ticker.upper() and x.metric == metric and x.available_at <= as_of
     ]
+    if provider is not None:
+        eligible = [x for x in eligible if x.provider == provider]
+    if basis is not None:
+        eligible = [x for x in eligible if x.basis == basis]
+    if period_type is not None:
+        eligible = [x for x in eligible if x.period_type == period_type]
     periods = {x.target_period_end for x in eligible}
     if period_end is None and len(periods) > 1:
         raise ValueError("period_end is required when multiple eligible target periods exist")
     eligible = [x for x in eligible if period_end is None or x.target_period_end == period_end]
     if not eligible:
         raise ValueError("no eligible consensus snapshots")
+    identities = {x.identity for x in eligible}
+    if len(identities) > 1:
+        raise ValueError(
+            "provider, basis, and period_type selection is required for multiple estimate series"
+        )
     current = max(eligible, key=lambda x: (x.available_at, x.provider_record_id))
     series = [x for x in eligible if x.identity == current.identity]
     diagnostics = []

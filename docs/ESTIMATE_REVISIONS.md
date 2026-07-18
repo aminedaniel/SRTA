@@ -16,3 +16,10 @@ Analyst counts and dispersion describe coverage and disagreement, rather than di
 Quality is separate from raw momentum and accounts for age, coverage, history, and consistency.
 Provider licensing may limit storing or redistributing consensus data; users must comply with their
 provider agreement. Revisions are research evidence—not trade instructions.
+
+## Reverse-DCF interaction metadata
+
+The requested `revision_vs_implied_growth_alignment`, `revision_vs_dcf_direction`, and
+`revision_dcf_divergence` fields are **explicitly deferred** until the reverse-DCF feature schema
+provides a stable point-in-time implied-growth availability contract. A3 remains independent from
+A2; no revision or DCF value is silently blended into the other signal in this release.

@@ -39,13 +39,17 @@ class OfflineEstimateProvider:
             if self.path.suffix.lower() == ".csv":
                 return list(csv.DictReader(text.splitlines()))
             value = json.loads(text)
-            return value if isinstance(value, list) else value.get("records", [])
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict) and isinstance(value.get("records"), list):
+                return value["records"]
+            raise ValueError("JSON input must be an array or object containing a records array")
         except (OSError, ValueError, json.JSONDecodeError) as error:
             raise ProviderResponseError(f"invalid estimate file: {error}") from error
 
     def normalize_estimates(self, raw_records: Iterable[dict[str, Any]]) -> list[ConsensusEstimate]:
         values = []
-        seen: dict[str, ConsensusEstimate] = {}
+        seen: dict[tuple[str, str], ConsensusEstimate] = {}
         logical: dict[tuple[object, ...], ConsensusEstimate] = {}
         for raw in raw_records:
             try:
@@ -54,7 +58,8 @@ class OfflineEstimateProvider:
                 )
             except Exception as error:
                 raise ProviderResponseError(f"invalid estimate record: {error}") from error
-            prior = seen.get(item.provider_record_id)
+            record_key = (item.provider, item.provider_record_id)
+            prior = seen.get(record_key)
             if prior is not None:
                 if prior.model_dump(mode="json") == item.model_dump(mode="json"):
                     continue
@@ -68,7 +73,7 @@ class OfflineEstimateProvider:
             ):
                 raise ProviderResponseError("conflicting logical estimate snapshot")
             logical[logical_key] = item
-            seen[item.provider_record_id] = item
+            seen[record_key] = item
             values.append(item)
         return sorted(values, key=lambda x: (x.available_at, x.provider_record_id))
 

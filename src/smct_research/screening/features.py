@@ -102,6 +102,12 @@ class FeatureSnapshotAssembler:
             raise TypeError("features must be EstimateRevisionFeatures")
         if features.as_of > evidence.as_of:
             raise ValueError("estimate evidence cannot be newer than feature snapshot")
+        selected = [
+            features.current,
+            *(revision.prior for revision in features.revisions.values() if revision.prior),
+        ]
+        if any(record.available_at > evidence.as_of for record in selected):
+            raise ValueError("estimate source cannot be newer than feature snapshot")
         prefix = features.metric.value
         values, sources, source_as_of = (
             dict(evidence.values),

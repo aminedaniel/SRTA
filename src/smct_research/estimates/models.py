@@ -56,14 +56,19 @@ class ConsensusEstimate(BaseModel):
         self.ticker = self.ticker.upper().strip()
         self.currency = self.currency.upper().strip()
         self.provider = self.provider.strip()
+        self.provider_record_id = self.provider_record_id.strip()
+        self.source_identifier = self.source_identifier.strip()
+        self.unit = self.unit.strip()
         self.retrieved_at = normalize_utc(self.retrieved_at)
         self.available_at = normalize_utc(self.available_at)
         if self.published_at:
             self.published_at = normalize_utc(self.published_at)
         if (
             not self.provider
+            or not self.ticker
             or not self.provider_record_id
-            or not self.unit.strip()
+            or not self.source_identifier
+            or not self.unit
             or not self.currency.isalpha()
             or len(self.currency) != 3
         ):
@@ -79,6 +84,8 @@ class ConsensusEstimate(BaseModel):
                 raise ValueError("estimate values must be finite")
         if self.analyst_count is not None and self.analyst_count < 0:
             raise ValueError("analyst_count cannot be negative")
+        if self.standard_deviation is not None and self.standard_deviation < 0:
+            raise ValueError("standard_deviation cannot be negative")
         if self.high is not None and self.low is not None and self.high < self.low:
             raise ValueError("high estimate below low estimate")
         return self
@@ -135,3 +142,14 @@ class EstimateRevisionFeatures(BaseModel):
     sign_transition: str | None = None
     quality: EstimateDataQuality
     diagnostics: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_point_in_time(self):
+        self.as_of = normalize_utc(self.as_of)
+        if self.current.available_at > self.as_of:
+            raise ValueError("current estimate is not available as_of")
+        if any(
+            item.prior and item.prior.available_at > self.as_of for item in self.revisions.values()
+        ):
+            raise ValueError("historical estimate is not available as_of")
+        return self
