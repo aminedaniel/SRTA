@@ -98,3 +98,23 @@ smct developer-velocity examples/developer_ecosystem/history.json \
 ## Known limitations
 
 The first implementation is intentionally offline-first. It does not scrape GitHub, infer private engineering productivity, assign investment recommendations, or assert that every repository under a corporate organization is financially relevant. Missing evidence remains missing, so companies with limited public data may have unavailable or low-confidence B1 evidence.
+
+## Matched-series growth
+
+Current levels and velocities use all valid current observations for the requested grain. Growth features use only matched current/prior pairs with the same provider, repository or package identity, and grain. Prior-only and current-only series are reported as unmatched diagnostics and are not interpreted as declines or growth from zero. Multiple providers for the same repository series are treated as ambiguous unless a future provider-precedence policy is added.
+
+## Historical mapping policy
+
+Mappings must be known by the evaluation timestamp and must cover the entire observation interval: `effective_from <= observation_window_start` and `effective_to is None or effective_to >= observation_window_end`. Partially overlapping aggregate observations are excluded rather than prorated, so pre-ownership repository or package history is not retroactively attached.
+
+## Package identity policy
+
+Package selectors distinguish ecosystem, normalized package name, optional provider, and optional repository identity. Thus `pypi:example` and `npm:example` are separate. Legacy `package_names` are still accepted for bundled examples, but typed package selectors are preferred when multiple ecosystems or providers can share names.
+
+## Configuration-field usage
+
+Retained configuration fields are production-wired: lookback windows and tolerance control grain selection; bot allow/deny/patterns drive bot classification; role weights affect repository weighting; meaningful-activity threshold affects breadth; fresh/stale days affect freshness confidence; concentration warning/high-risk thresholds affect penalties/diagnostics; star-spike thresholds affect manipulation diagnostics; package download/dependent weights affect quality score; minimum mapped repositories and preferred history reduce confidence or availability; B1 scoring weights affect contributor, external, maintenance, breadth, and bot score components. The composite B1 weight remains centralized in the composite scorer rather than duplicated in feature configuration.
+
+## Provider revisions
+
+Offline providers preserve later point-in-time corrections when the same provider/repository or provider/package interval has a new `available_at` and a new provider record ID. Exact duplicates are idempotent, while conflicting records for the same provider record ID or same logical interval plus `available_at` are controlled provider errors. Feature selection uses only revisions available by the evaluation timestamp and chooses the latest eligible revision deterministically.

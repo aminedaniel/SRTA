@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from smct_research.developer_ecosystem.models import RepositoryRole
 
@@ -45,7 +46,6 @@ class MinimumHistoryConfig(BaseModel):
 
 
 class B1ScoringWeightsConfig(BaseModel):
-    composite_weight: float = 0.85
     contributor_growth: float = 0.28
     external_contributor_growth: float = 0.18
     package_download_growth: float = 0.18
@@ -83,6 +83,23 @@ class DeveloperEcosystemConfig(BaseModel):
     )
     minimum_history_requirements: MinimumHistoryConfig = Field(default_factory=MinimumHistoryConfig)
     b1_scoring_weights: B1ScoringWeightsConfig = Field(default_factory=B1ScoringWeightsConfig)
+
+    @field_validator("lookback_windows_days")
+    @classmethod
+    def validate_windows(cls, value: list[int]) -> list[int]:
+        if not value or any(item <= 0 for item in value) or 90 not in value:
+            raise ValueError("lookback windows must be positive and include 90")
+        return value
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> DeveloperEcosystemConfig:
+        if self.observation_window_tolerance_days < 0:
+            raise ValueError("observation_window_tolerance_days must be nonnegative")
+        if self.staleness_thresholds.fresh_days >= self.staleness_thresholds.stale_days:
+            raise ValueError("fresh_days must be less than stale_days")
+        for pattern in self.bot_filtering.bot_login_patterns:
+            re.compile(pattern)
+        return self
 
 
 def _parse_scalar(value: str) -> object:

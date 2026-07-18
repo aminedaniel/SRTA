@@ -110,7 +110,6 @@ class RepositoryObservation(BaseModel, frozen=True):
     is_archived: bool = False
     is_fork: bool = False
     is_mirror: bool = False
-    include_fork: bool = False
     company_ticker: str
     commit_count: int = Field(ge=0)
     active_contributor_count: int = Field(ge=0)
@@ -196,6 +195,23 @@ class PackageObservation(BaseModel, frozen=True):
         return self
 
 
+class PackageSelector(BaseModel, frozen=True):
+    ecosystem: PackageEcosystem
+    package_name: str = Field(min_length=1)
+    provider: str | None = None
+    repository_id: str | None = None
+    repository_owner: str | None = None
+    repository_name: str | None = None
+
+    @model_validator(mode="after")
+    def normalize(self) -> PackageSelector:
+        object.__setattr__(self, "package_name", self.package_name.strip().lower())
+        if self.provider is not None:
+            object.__setattr__(self, "provider", self.provider.strip().lower())
+        object.__setattr__(self, "package_name", self.package_name.strip().lower())
+        return self
+
+
 class RepositoryMapping(BaseModel, frozen=True):
     ticker: str
     provider: str = "github"
@@ -208,6 +224,8 @@ class RepositoryMapping(BaseModel, frozen=True):
     weight: float = Field(default=1.0, ge=0)
     is_first_party: bool = True
     package_names: tuple[str, ...] = ()
+    package_selectors: tuple[PackageSelector, ...] = ()
+    include_forks: bool = False
     effective_from: datetime
     effective_to: datetime | None = None
     known_at: datetime
@@ -222,7 +240,15 @@ class RepositoryMapping(BaseModel, frozen=True):
         object.__setattr__(self, "provider", self.provider.strip().lower())
         if self.name and not self.owner:
             raise ValueError("repository name mappings require an owner")
-        if not any((self.repository_id, self.name, self.organization, self.package_names)):
+        if not any(
+            (
+                self.repository_id,
+                self.name,
+                self.organization,
+                self.package_names,
+                self.package_selectors,
+            )
+        ):
             raise ValueError("mapping requires repository, organization, or package selector")
         if self.effective_to is not None and self.effective_to < self.effective_from:
             raise ValueError("effective_to cannot be before effective_from")

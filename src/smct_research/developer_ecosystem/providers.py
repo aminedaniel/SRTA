@@ -83,6 +83,7 @@ def _logical_key(
             item.repository_id,
             item.observation_window_start.isoformat(),
             item.observation_window_end.isoformat(),
+            item.available_at.isoformat(),
         )
     if isinstance(item, PackageObservation):
         return (
@@ -92,6 +93,7 @@ def _logical_key(
             item.package_name,
             item.observation_window_start.isoformat(),
             item.observation_window_end.isoformat(),
+            item.available_at.isoformat(),
         )
     return (
         "map",

@@ -31,7 +31,6 @@ minimum_history_requirements:
   minimum_mapped_repositories: 1
   preferred_windows_days: 180
 b1_scoring_weights:
-  composite_weight: 0.85
   contributor_growth: 0.28
   external_contributor_growth: 0.18
   package_download_growth: 0.18
