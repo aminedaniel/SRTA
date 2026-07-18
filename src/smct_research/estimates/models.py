@@ -137,6 +137,7 @@ class EstimateRevisionFeatures(BaseModel):
     high_change_30d: float | None = None
     low_change_30d: float | None = None
     dispersion_change_30d: float | None = None
+    dispersion_change_ratio_30d: float | None = None
     breadth_change_30d: float | None = None
     days_since_latest_update: int
     sign_transition: str | None = None

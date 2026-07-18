@@ -6,8 +6,10 @@ from smct_research.core.models import normalize_utc
 
 from .models import (
     ConsensusEstimate,
+    EstimateBasis,
     EstimateDataQuality,
     EstimateMetric,
+    EstimatePeriod,
     EstimateRevision,
     EstimateRevisionFeatures,
 )
@@ -47,6 +49,22 @@ def _field_change(current: float | int | None, prior: float | int | None) -> flo
     return None if current is None or prior is None else current - prior
 
 
+def _relative_change(current: float | int | None, prior: float | int | None) -> float | None:
+    """Scale-free change used for scoring fields such as estimate dispersion."""
+    if current is None or prior is None:
+        return None
+    current_value = float(current)
+    prior_value = float(prior)
+    if abs(prior_value) > 1e-6:
+        value = (current_value - prior_value) / abs(prior_value)
+    else:
+        denominator = abs(current_value) + abs(prior_value)
+        value = 2 * (current_value - prior_value) / denominator if denominator > 1e-12 else 0.0
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value
+
+
 def calculate_features(
     records: list[ConsensusEstimate],
     ticker: str,
@@ -55,8 +73,8 @@ def calculate_features(
     period_end: date | None = None,
     tolerance_days: int = 7,
     provider: str | None = None,
-    basis=None,
-    period_type=None,
+    basis: EstimateBasis | None = None,
+    period_type: EstimatePeriod | None = None,
 ) -> EstimateRevisionFeatures:
     as_of = normalize_utc(as_of)
     eligible = [
@@ -87,6 +105,10 @@ def calculate_features(
     # A rollover is only meaningful for the same provider/stable horizon label, never a comparison.
     if current.horizon_label and any(
         x.provider == current.provider
+        and x.period_type == current.period_type
+        and x.unit == current.unit
+        and x.currency == current.currency
+        and x.basis == current.basis
         and x.horizon_label == current.horizon_label
         and x.target_period_end != current.target_period_end
         for x in records
@@ -160,6 +182,9 @@ def calculate_features(
         high_change_30d=_field_change(current.high, prior30.high if prior30 else None),
         low_change_30d=_field_change(current.low, prior30.low if prior30 else None),
         dispersion_change_30d=_field_change(
+            current.standard_deviation, prior30.standard_deviation if prior30 else None
+        ),
+        dispersion_change_ratio_30d=_relative_change(
             current.standard_deviation, prior30.standard_deviation if prior30 else None
         ),
         breadth_change_30d=_field_change(

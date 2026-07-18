@@ -52,6 +52,8 @@ class OfflineEstimateProvider:
         seen: dict[tuple[str, str], ConsensusEstimate] = {}
         logical: dict[tuple[object, ...], ConsensusEstimate] = {}
         for raw in raw_records:
+            if not isinstance(raw, dict):
+                raise ProviderResponseError("invalid estimate record: expected object")
             try:
                 item = ConsensusEstimate.model_validate(
                     {**raw, "provider": raw.get("provider", self.provider_id)}
@@ -68,9 +70,7 @@ class OfflineEstimateProvider:
                 )
             logical_key = (*item.identity, item.available_at)
             conflict = logical.get(logical_key)
-            if conflict is not None and conflict.model_dump(mode="json") != item.model_dump(
-                mode="json"
-            ):
+            if conflict is not None:
                 raise ProviderResponseError("conflicting logical estimate snapshot")
             logical[logical_key] = item
             seen[record_key] = item

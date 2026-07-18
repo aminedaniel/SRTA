@@ -7,17 +7,17 @@ from smct_research.core.signal import ResearchSignal
 class ConsensusEstimateRevisionSignal(ResearchSignal):
     id = "A3"
     name = "Consensus Estimate Revision Velocity"
-    required_features = ("eps_revision_30d", "estimate_revision_quality_score")
+    required_features = ("eps_revision_30d", "eps_revision_quality_score")
 
     def evaluate(self, snapshot: FeatureSnapshot) -> SignalResult:
         self.validate(snapshot)
         rev = snapshot.require_float("eps_revision_30d")
-        quality = snapshot.require_float("estimate_revision_quality_score")
+        quality = snapshot.require_float("eps_revision_quality_score")
         accel = snapshot.values.get("eps_revision_acceleration", 0)
         revenue = snapshot.values.get("revenue_revision_30d")
         raw_streak = snapshot.values.get("eps_revision_streak", 0)
         streak = float(raw_streak) if isinstance(raw_streak, (int, float)) else 0.0
-        dispersion = snapshot.values.get("eps_dispersion_change_30d", 0)
+        dispersion = snapshot.values.get("eps_dispersion_change_ratio_30d", 0)
         age = snapshot.values.get("eps_consensus_age_days", 0)
         score = (
             15 * rev

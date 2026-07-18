@@ -11,7 +11,7 @@ import typer
 
 from smct_research.core.models import FeatureSnapshot
 from smct_research.core.signal import SignalRegistry
-from smct_research.estimates.models import EstimateMetric
+from smct_research.estimates.models import EstimateBasis, EstimateMetric, EstimatePeriod
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
@@ -264,6 +264,9 @@ def revisions(
     as_of: str = typer.Option(...),
     metric: EstimateMetric = typer.Option(EstimateMetric.EPS),  # noqa: B008
     period_end: str | None = typer.Option(None),
+    provider: str | None = typer.Option(None),
+    basis: EstimateBasis | None = typer.Option(None),  # noqa: B008
+    period_type: EstimatePeriod | None = typer.Option(None),  # noqa: B008
     output_json: Path | None = typer.Option(None),  # noqa: B008
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     lookback_tolerance_days: int = typer.Option(7, min=0),
@@ -274,7 +277,15 @@ def revisions(
         selected_period = datetime.fromisoformat(period_end).date() if period_end else None
         records = OfflineEstimateProvider(estimate_history_file).fetch_estimate_history(ticker)
         result = calculate_features(
-            records, ticker, metric, timestamp, selected_period, lookback_tolerance_days
+            records,
+            ticker,
+            metric,
+            timestamp,
+            selected_period,
+            lookback_tolerance_days,
+            provider=provider,
+            basis=basis,
+            period_type=period_type,
         )
     except (ProviderResponseError, ValueError, OSError, TypeError) as error:
         raise typer.BadParameter(str(error)) from error

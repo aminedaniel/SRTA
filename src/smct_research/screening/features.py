@@ -125,6 +125,7 @@ class FeatureSnapshotAssembler:
                 f"{prefix}_low_change_30d": features.low_change_30d,
                 f"{prefix}_dispersion_current": features.current.standard_deviation,
                 f"{prefix}_dispersion_change_30d": features.dispersion_change_30d,
+                f"{prefix}_dispersion_change_ratio_30d": features.dispersion_change_ratio_30d,
                 f"{prefix}_estimate_breadth_change_30d": features.breadth_change_30d,
                 f"{prefix}_consensus_age_days": features.days_since_latest_update,
                 f"{prefix}_sign_transition": features.sign_transition,
@@ -151,9 +152,6 @@ class FeatureSnapshotAssembler:
         )
         sources[key] = features.current.source_identifier
         source_as_of[key] = features.current.available_at
-        # EPS is the required A3 core; generic aliases are therefore written only once.
-        if prefix == "eps":
-            values["estimate_revision_quality_score"] = features.quality.score
         return evidence.model_copy(
             update={"values": values, "sources": sources, "source_as_of": source_as_of}
         )
