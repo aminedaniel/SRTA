@@ -9,8 +9,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from smct_research.estimates.models import ConsensusEstimate
-
+    from smct_research.developer_ecosystem.models import (
+        PackageObservation,
+        RepositoryMapping,
+        RepositoryObservation,
+    )
+from smct_research.developer_ecosystem.models import (
+    PackageObservation,
+    RepositoryMapping,
+    RepositoryObservation,
+)
 from smct_research.estimates.models import ConsensusEstimate
 from smct_research.financials.models import FeatureValue, FinancialObservation
 
@@ -207,3 +215,126 @@ class LocalAnalyticalStore:
         return [
             ConsensusEstimate.model_validate(dict(zip(names, row, strict=True))) for row in rows
         ]
+
+
+def _json_identity(item: object) -> str:
+    payload = item.model_dump(mode="json")  # type: ignore[attr-defined]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _store_immutable_json(
+    self: LocalAnalyticalStore,
+    table: str,
+    provider: str,
+    provider_record_id: str,
+    logical_id: str,
+    payload: str,
+) -> None:
+    self.connection.execute(
+        f"CREATE TABLE IF NOT EXISTS {table} (provider VARCHAR, provider_record_id VARCHAR, logical_id VARCHAR, payload_json VARCHAR, PRIMARY KEY(provider, provider_record_id), UNIQUE(provider, logical_id))"
+    )
+    existing = self.connection.execute(
+        f"SELECT payload_json FROM {table} WHERE provider=? AND provider_record_id=?",
+        [provider, provider_record_id],
+    ).fetchone()
+    if existing is not None:
+        if existing[0] == payload:
+            return
+        raise ValueError("conflicting immutable provider record ID")
+    logical = self.connection.execute(
+        f"SELECT payload_json FROM {table} WHERE provider=? AND logical_id=?",
+        [provider, logical_id],
+    ).fetchone()
+    if logical is not None and logical[0] != payload:
+        raise ValueError("conflicting logical developer ecosystem record")
+    self.connection.execute(
+        f"INSERT INTO {table} VALUES (?, ?, ?, ?)",
+        [provider, provider_record_id, logical_id, payload],
+    )
+
+
+def store_repository_observations(
+    self: LocalAnalyticalStore, observations: Iterable[RepositoryObservation]
+) -> None:
+    for item in observations:
+        payload = item.model_dump_json()
+        logical = f"{item.repository_id}|{item.observation_window_start.isoformat()}|{item.observation_window_end.isoformat()}|{item.available_at.isoformat()}"
+        _store_immutable_json(
+            self,
+            "developer_repository_observations",
+            item.provider,
+            item.provider_record_id,
+            logical,
+            payload,
+        )
+
+
+def load_repository_observations(self: LocalAnalyticalStore) -> list[RepositoryObservation]:
+    self.connection.execute(
+        "CREATE TABLE IF NOT EXISTS developer_repository_observations (provider VARCHAR, provider_record_id VARCHAR, logical_id VARCHAR, payload_json VARCHAR, PRIMARY KEY(provider, provider_record_id), UNIQUE(provider, logical_id))"
+    )
+    rows = self.connection.execute(
+        "SELECT payload_json FROM developer_repository_observations ORDER BY provider, provider_record_id"
+    ).fetchall()
+    return [RepositoryObservation.model_validate_json(row[0]) for row in rows]
+
+
+def store_package_observations(
+    self: LocalAnalyticalStore, observations: Iterable[PackageObservation]
+) -> None:
+    for item in observations:
+        payload = item.model_dump_json()
+        logical = f"{item.ecosystem}|{item.package_name}|{item.observation_window_start.isoformat()}|{item.observation_window_end.isoformat()}|{item.available_at.isoformat()}"
+        _store_immutable_json(
+            self,
+            "developer_package_observations",
+            item.provider,
+            item.provider_record_id,
+            logical,
+            payload,
+        )
+
+
+def load_package_observations(self: LocalAnalyticalStore) -> list[PackageObservation]:
+    self.connection.execute(
+        "CREATE TABLE IF NOT EXISTS developer_package_observations (provider VARCHAR, provider_record_id VARCHAR, logical_id VARCHAR, payload_json VARCHAR, PRIMARY KEY(provider, provider_record_id), UNIQUE(provider, logical_id))"
+    )
+    rows = self.connection.execute(
+        "SELECT payload_json FROM developer_package_observations ORDER BY provider, provider_record_id"
+    ).fetchall()
+    return [PackageObservation.model_validate_json(row[0]) for row in rows]
+
+
+def store_repository_mappings(
+    self: LocalAnalyticalStore, mappings: Iterable[RepositoryMapping]
+) -> None:
+    for item in mappings:
+        payload = item.model_dump_json()
+        provider_record_id = _json_identity(item)
+        logical = f"{item.ticker}|{item.provider}|{item.organization}|{item.owner}|{item.name}|{item.repository_id}|{item.effective_from.isoformat()}|{item.known_at.isoformat()}"
+        _store_immutable_json(
+            self,
+            "developer_repository_mappings",
+            item.provider,
+            provider_record_id,
+            logical,
+            payload,
+        )
+
+
+def load_repository_mappings(self: LocalAnalyticalStore) -> list[RepositoryMapping]:
+    self.connection.execute(
+        "CREATE TABLE IF NOT EXISTS developer_repository_mappings (provider VARCHAR, provider_record_id VARCHAR, logical_id VARCHAR, payload_json VARCHAR, PRIMARY KEY(provider, provider_record_id), UNIQUE(provider, logical_id))"
+    )
+    rows = self.connection.execute(
+        "SELECT payload_json FROM developer_repository_mappings ORDER BY provider, provider_record_id"
+    ).fetchall()
+    return [RepositoryMapping.model_validate_json(row[0]) for row in rows]
+
+
+LocalAnalyticalStore.store_repository_observations = store_repository_observations  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_repository_observations = load_repository_observations  # type: ignore[attr-defined]
+LocalAnalyticalStore.store_package_observations = store_package_observations  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_package_observations = load_package_observations  # type: ignore[attr-defined]
+LocalAnalyticalStore.store_repository_mappings = store_repository_mappings  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_repository_mappings = load_repository_mappings  # type: ignore[attr-defined]

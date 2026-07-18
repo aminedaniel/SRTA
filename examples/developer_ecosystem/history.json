@@ -1,0 +1,371 @@
+{
+  "repository_observations": [
+    {
+      "provider": "github",
+      "provider_record_id": "acme-core-prior",
+      "repository_id": "r1",
+      "owner": "acme",
+      "name": "core",
+      "company_ticker": "ACME",
+      "commit_count": 45,
+      "active_contributor_count": 3,
+      "new_contributor_count": 1,
+      "returning_contributor_count": 2,
+      "external_contributor_count": 1,
+      "pull_requests": {
+        "opened_count": 10,
+        "merged_count": 8,
+        "median_merge_time_hours": 24,
+        "open_count": 2,
+        "abandoned_share": 0.05
+      },
+      "issues": {
+        "opened_count": 5,
+        "closed_count": 7,
+        "open_count": 25,
+        "median_close_time_hours": 48,
+        "stale_share": 0.1
+      },
+      "releases": {
+        "release_count": 1,
+        "latest_release_at": "2026-04-17T00:00:00Z"
+      },
+      "popularity": {
+        "stargazer_count": 100,
+        "fork_count": 20,
+        "watcher_count": 10,
+        "star_spike_share": null
+      },
+      "contributors": [
+        {
+          "login": "alice",
+          "commit_count": 20,
+          "is_bot": false,
+          "is_external": false
+        },
+        {
+          "login": "bob",
+          "commit_count": 8,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "dependabot[bot]",
+          "commit_count": 3,
+          "is_bot": true,
+          "is_external": false
+        }
+      ],
+      "default_branch_activity_count": 45,
+      "repository_size_kb": 1000,
+      "generated_code_share": 0,
+      "generated_activity_share": 0,
+      "bot_activity_share": 0,
+      "mass_formatting_share": 0,
+      "lockfile_only_share": 0,
+      "dependency_update_share": 0,
+      "imported_history": false,
+      "observation_window_start": "2026-01-18T00:00:00Z",
+      "observation_window_end": "2026-04-17T00:00:00Z",
+      "retrieved_at": "2026-04-18T00:00:00Z",
+      "available_at": "2026-04-18T00:00:00Z",
+      "source_provenance": "fixture:acme-core-prior"
+    },
+    {
+      "provider": "github",
+      "provider_record_id": "acme-core-current",
+      "repository_id": "r1",
+      "owner": "acme",
+      "name": "core",
+      "company_ticker": "ACME",
+      "commit_count": 75,
+      "active_contributor_count": 5,
+      "new_contributor_count": 2,
+      "returning_contributor_count": 3,
+      "external_contributor_count": 3,
+      "pull_requests": {
+        "opened_count": 18,
+        "merged_count": 15,
+        "median_merge_time_hours": 24,
+        "open_count": 2,
+        "abandoned_share": 0.05
+      },
+      "issues": {
+        "opened_count": 8,
+        "closed_count": 13,
+        "open_count": 20,
+        "median_close_time_hours": 48,
+        "stale_share": 0.1
+      },
+      "releases": {
+        "release_count": 3,
+        "latest_release_at": "2026-07-16T00:00:00Z"
+      },
+      "popularity": {
+        "stargazer_count": 140,
+        "fork_count": 32,
+        "watcher_count": 10,
+        "star_spike_share": null
+      },
+      "contributors": [
+        {
+          "login": "alice",
+          "commit_count": 22,
+          "is_bot": false,
+          "is_external": false
+        },
+        {
+          "login": "bob",
+          "commit_count": 18,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "cara",
+          "commit_count": 15,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "renovate",
+          "commit_count": 4,
+          "is_bot": true,
+          "is_external": false
+        }
+      ],
+      "default_branch_activity_count": 75,
+      "repository_size_kb": 1000,
+      "generated_code_share": 0,
+      "generated_activity_share": 0,
+      "bot_activity_share": 0,
+      "mass_formatting_share": 0,
+      "lockfile_only_share": 0,
+      "dependency_update_share": 0,
+      "imported_history": false,
+      "observation_window_start": "2026-04-18T00:00:00Z",
+      "observation_window_end": "2026-07-16T00:00:00Z",
+      "retrieved_at": "2026-07-17T00:00:00Z",
+      "available_at": "2026-07-17T00:00:00Z",
+      "source_provenance": "fixture:acme-core-current"
+    },
+    {
+      "provider": "github",
+      "provider_record_id": "acme-sdk-current",
+      "repository_id": "r2",
+      "owner": "acme",
+      "name": "sdk",
+      "company_ticker": "ACME",
+      "commit_count": 30,
+      "active_contributor_count": 3,
+      "new_contributor_count": 1,
+      "returning_contributor_count": 2,
+      "external_contributor_count": 2,
+      "pull_requests": {
+        "opened_count": 8,
+        "merged_count": 6,
+        "median_merge_time_hours": 24,
+        "open_count": 2,
+        "abandoned_share": 0.05
+      },
+      "issues": {
+        "opened_count": 5,
+        "closed_count": 6,
+        "open_count": 9,
+        "median_close_time_hours": 48,
+        "stale_share": 0.1
+      },
+      "releases": {
+        "release_count": 2,
+        "latest_release_at": "2026-07-16T00:00:00Z"
+      },
+      "popularity": {
+        "stargazer_count": 70,
+        "fork_count": 16,
+        "watcher_count": 10,
+        "star_spike_share": null
+      },
+      "contributors": [
+        {
+          "login": "alice",
+          "commit_count": 22,
+          "is_bot": false,
+          "is_external": false
+        },
+        {
+          "login": "bob",
+          "commit_count": 18,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "cara",
+          "commit_count": 15,
+          "is_bot": false,
+          "is_external": true
+        }
+      ],
+      "default_branch_activity_count": 30,
+      "repository_size_kb": 1000,
+      "generated_code_share": 0,
+      "generated_activity_share": 0,
+      "bot_activity_share": 0,
+      "mass_formatting_share": 0,
+      "lockfile_only_share": 0,
+      "dependency_update_share": 0,
+      "imported_history": false,
+      "observation_window_start": "2026-04-18T00:00:00Z",
+      "observation_window_end": "2026-07-16T00:00:00Z",
+      "retrieved_at": "2026-07-17T00:00:00Z",
+      "available_at": "2026-07-17T00:00:00Z",
+      "source_provenance": "fixture:acme-sdk-current"
+    },
+    {
+      "provider": "github",
+      "provider_record_id": "future",
+      "repository_id": "r1",
+      "owner": "acme",
+      "name": "core",
+      "company_ticker": "ACME",
+      "commit_count": 999,
+      "active_contributor_count": 20,
+      "new_contributor_count": 10,
+      "returning_contributor_count": 10,
+      "external_contributor_count": 10,
+      "pull_requests": {
+        "opened_count": 1,
+        "merged_count": 1,
+        "median_merge_time_hours": 24,
+        "open_count": 2,
+        "abandoned_share": 0.05
+      },
+      "issues": {
+        "opened_count": 1,
+        "closed_count": 1,
+        "open_count": 1,
+        "median_close_time_hours": 48,
+        "stale_share": 0.1
+      },
+      "releases": {
+        "release_count": 1,
+        "latest_release_at": "2026-10-16T00:00:00Z"
+      },
+      "popularity": {
+        "stargazer_count": 999,
+        "fork_count": 999,
+        "watcher_count": 10,
+        "star_spike_share": null
+      },
+      "contributors": [
+        {
+          "login": "alice",
+          "commit_count": 22,
+          "is_bot": false,
+          "is_external": false
+        },
+        {
+          "login": "bob",
+          "commit_count": 18,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "cara",
+          "commit_count": 15,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "renovate",
+          "commit_count": 4,
+          "is_bot": true,
+          "is_external": false
+        }
+      ],
+      "default_branch_activity_count": 999,
+      "repository_size_kb": 1000,
+      "generated_code_share": 0,
+      "generated_activity_share": 0,
+      "bot_activity_share": 0,
+      "mass_formatting_share": 0,
+      "lockfile_only_share": 0,
+      "dependency_update_share": 0,
+      "imported_history": false,
+      "observation_window_start": "2026-07-18T00:00:00Z",
+      "observation_window_end": "2026-10-16T00:00:00Z",
+      "retrieved_at": "2026-10-17T00:00:00Z",
+      "available_at": "2026-10-17T00:00:00Z",
+      "source_provenance": "fixture:future"
+    },
+    {
+      "provider": "github",
+      "provider_record_id": "unmapped",
+      "repository_id": "r9",
+      "owner": "random",
+      "name": "acme",
+      "company_ticker": "ACME",
+      "commit_count": 10,
+      "active_contributor_count": 1,
+      "new_contributor_count": 0,
+      "returning_contributor_count": 1,
+      "external_contributor_count": 1,
+      "pull_requests": {
+        "opened_count": 1,
+        "merged_count": 1,
+        "median_merge_time_hours": 24,
+        "open_count": 2,
+        "abandoned_share": 0.05
+      },
+      "issues": {
+        "opened_count": 1,
+        "closed_count": 1,
+        "open_count": 1,
+        "median_close_time_hours": 48,
+        "stale_share": 0.1
+      },
+      "releases": {
+        "release_count": 0,
+        "latest_release_at": "2026-07-16T00:00:00Z"
+      },
+      "popularity": {
+        "stargazer_count": 1000,
+        "fork_count": 1,
+        "watcher_count": 10,
+        "star_spike_share": 0.95
+      },
+      "contributors": [
+        {
+          "login": "alice",
+          "commit_count": 20,
+          "is_bot": false,
+          "is_external": false
+        },
+        {
+          "login": "bob",
+          "commit_count": 8,
+          "is_bot": false,
+          "is_external": true
+        },
+        {
+          "login": "dependabot[bot]",
+          "commit_count": 3,
+          "is_bot": true,
+          "is_external": false
+        }
+      ],
+      "default_branch_activity_count": 10,
+      "repository_size_kb": 1000,
+      "generated_code_share": 0,
+      "generated_activity_share": 0,
+      "bot_activity_share": 0,
+      "mass_formatting_share": 0,
+      "lockfile_only_share": 0,
+      "dependency_update_share": 0,
+      "imported_history": false,
+      "observation_window_start": "2026-04-18T00:00:00Z",
+      "observation_window_end": "2026-07-16T00:00:00Z",
+      "retrieved_at": "2026-07-17T00:00:00Z",
+      "available_at": "2026-07-17T00:00:00Z",
+      "source_provenance": "fixture:unmapped"
+    }
+  ]
+}
