@@ -6,8 +6,12 @@ import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from smct_research.estimates.models import ConsensusEstimate
+
+from smct_research.estimates.models import ConsensusEstimate
 from smct_research.financials.models import FeatureValue, FinancialObservation
 
 
@@ -111,3 +115,95 @@ class LocalAnalyticalStore:
         self.connection.executemany("INSERT INTO feature_export VALUES (?, ?, ?, ?, ?, ?)", rows)
         escaped = str(path).replace("'", "''")
         self.connection.execute(f"COPY feature_export TO '{escaped}' (FORMAT PARQUET)")
+
+    def _ensure_estimate_table(self) -> None:
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS estimate_snapshots ("
+            "provider VARCHAR, provider_record_id VARCHAR, ticker VARCHAR, metric VARCHAR, "
+            "target_period_end DATE, period_type VARCHAR, horizon_label VARCHAR, unit VARCHAR, "
+            "currency VARCHAR, basis VARCHAR, consensus DOUBLE, analyst_count INTEGER, "
+            "high DOUBLE, "
+            "low DOUBLE, standard_deviation DOUBLE, estimate_breadth DOUBLE, "
+            "source_identifier VARCHAR, "
+            "published_at TIMESTAMP, retrieved_at TIMESTAMP, available_at TIMESTAMP, "
+            "PRIMARY KEY(provider, provider_record_id), "
+            "UNIQUE(ticker, metric, target_period_end, period_type, unit, currency, basis, "
+            "available_at, provider))"
+        )
+
+    @staticmethod
+    def _estimate_row(item: ConsensusEstimate) -> list[Any]:
+        return [
+            item.provider,
+            item.provider_record_id,
+            item.ticker,
+            item.metric.value,
+            item.target_period_end,
+            item.period_type.value,
+            item.horizon_label,
+            item.unit,
+            item.currency,
+            item.basis.value,
+            item.consensus,
+            item.analyst_count,
+            item.high,
+            item.low,
+            item.standard_deviation,
+            item.estimate_breadth,
+            item.source_identifier,
+            item.published_at,
+            item.retrieved_at,
+            item.available_at,
+        ]
+
+    def store_estimate_snapshots(self, snapshots: Iterable[ConsensusEstimate]) -> None:
+        """Append exact duplicates only; conflicting immutable records raise ValueError."""
+        self._ensure_estimate_table()
+        for item in snapshots:
+            if not isinstance(item, ConsensusEstimate):
+                raise TypeError("snapshots must contain ConsensusEstimate")
+            existing = self.connection.execute(
+                "SELECT * FROM estimate_snapshots WHERE provider = ? AND provider_record_id = ?",
+                [item.provider, item.provider_record_id],
+            ).fetchone()
+            if existing is not None:
+                names = [column[0] for column in self.connection.description]
+                stored = ConsensusEstimate.model_validate(dict(zip(names, existing, strict=True)))
+                if stored.model_dump(mode="json") == item.model_dump(mode="json"):
+                    continue
+                raise ValueError("conflicting immutable provider record ID")
+            logical = self.connection.execute(
+                "SELECT provider_record_id FROM estimate_snapshots WHERE ticker=? AND metric=? "
+                "AND target_period_end=? AND period_type=? AND unit=? AND currency=? AND basis=? "
+                "AND available_at=? AND provider=?",
+                [
+                    item.ticker,
+                    item.metric.value,
+                    item.target_period_end,
+                    item.period_type.value,
+                    item.unit,
+                    item.currency,
+                    item.basis.value,
+                    item.available_at,
+                    item.provider,
+                ],
+            ).fetchone()
+            if logical is not None:
+                raise ValueError("conflicting logical estimate snapshot")
+            self.connection.execute(
+                "INSERT INTO estimate_snapshots VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                self._estimate_row(item),
+            )
+
+    def load_estimate_snapshots(self) -> list[ConsensusEstimate]:
+        """Read persisted snapshots for deterministic full-field round-trip verification."""
+        self._ensure_estimate_table()
+        cursor = self.connection.execute(
+            "SELECT * FROM estimate_snapshots ORDER BY available_at, provider, provider_record_id"
+        )
+        rows = cursor.fetchall()
+        names = [item[0] for item in cursor.description]
+        return [
+            ConsensusEstimate.model_validate(dict(zip(names, row, strict=True))) for row in rows
+        ]

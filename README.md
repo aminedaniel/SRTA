@@ -62,3 +62,9 @@ smct screen examples/screening/universe.json examples/screening/features \
 Scores normalize only across signals with all required evidence. The output separately reports
 unavailable signals, feature completeness, stale evidence, and point-in-time warnings; absence of
 evidence is never converted into a neutral signal score.
+
+## Valuation and consensus revisions
+
+`smct dcf` runs offline reverse-DCF scenarios (signal A2). `smct revisions estimates.json --ticker
+SRTA --as-of 2026-07-17T00:00:00Z` calculates point-in-time consensus revision features for the
+independent A3 **Consensus Estimate Revision Velocity** signal. See `docs/ESTIMATE_REVISIONS.md`.

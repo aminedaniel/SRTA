@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from datetime import UTC, datetime
@@ -10,11 +11,16 @@ import typer
 
 from smct_research.core.models import FeatureSnapshot
 from smct_research.core.signal import SignalRegistry
+from smct_research.estimates.models import EstimateBasis, EstimateMetric, EstimatePeriod
+from smct_research.estimates.service import calculate_features
+from smct_research.providers.base import ProviderResponseError
+from smct_research.providers.estimates import OfflineEstimateProvider
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.io import load_feature_snapshots, load_universe, write_csv, write_json
 from smct_research.screening.service import BatchEvaluationService
 from smct_research.screening.universe import UniversePolicy
 from smct_research.signals.congressional_purchases import CongressionalPurchaseSignal
+from smct_research.signals.estimate_revision_velocity import ConsensusEstimateRevisionSignal
 from smct_research.signals.fed_regime import FederalReserveRegimeSignal
 from smct_research.signals.form4_cluster_buying import Form4ClusterBuyingSignal
 from smct_research.signals.reddit_awareness import RedditAwarenessSignal
@@ -36,6 +42,7 @@ def default_registry() -> SignalRegistry:
     registry = SignalRegistry()
     registry.register(ValuationCompressionSignal())
     registry.register(ReverseDCFExpectationsSignal())
+    registry.register(ConsensusEstimateRevisionSignal())
     registry.register(RedditAwarenessSignal())
     registry.register(CongressionalPurchaseSignal())
     registry.register(Form4ClusterBuyingSignal())
@@ -247,6 +254,61 @@ def dcf(
     rendered = json.dumps(output, indent=2)
     if output_json:
         output_json.write_text(rendered + "\n")
+    typer.echo(rendered)
+
+
+@app.command()
+def revisions(
+    estimate_history_file: Path,
+    ticker: str = typer.Option(...),
+    as_of: str = typer.Option(...),
+    metric: EstimateMetric = typer.Option(EstimateMetric.EPS),  # noqa: B008
+    period_end: str | None = typer.Option(None),
+    provider: str | None = typer.Option(None),
+    basis: EstimateBasis | None = typer.Option(None),  # noqa: B008
+    period_type: EstimatePeriod | None = typer.Option(None),  # noqa: B008
+    unit: str | None = typer.Option(None),
+    currency: str | None = typer.Option(None),
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+    output_csv: Path | None = typer.Option(None),  # noqa: B008
+    lookback_tolerance_days: int = typer.Option(7, min=0),
+) -> None:
+    """Calculate deterministic point-in-time consensus estimate revisions from a local file."""
+    try:
+        timestamp = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        selected_period = datetime.fromisoformat(period_end).date() if period_end else None
+        records = OfflineEstimateProvider(estimate_history_file).fetch_estimate_history(ticker)
+        result = calculate_features(
+            records,
+            ticker,
+            metric,
+            timestamp,
+            selected_period,
+            lookback_tolerance_days,
+            provider=provider,
+            basis=basis,
+            period_type=period_type,
+            unit=unit,
+            currency=currency,
+        )
+    except (ProviderResponseError, ValueError, OSError, TypeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    payload = result.model_dump(mode="json")
+    rendered = json.dumps(payload, indent=2)
+    if output_json:
+        output_json.write_text(rendered + "\n")
+    if output_csv:
+        row = {
+            "ticker": result.ticker,
+            "metric": result.metric.value,
+            "current": result.current.consensus,
+            "quality_score": result.quality.score,
+            **{f"revision_{days}d": item.value for days, item in result.revisions.items()},
+        }
+        with output_csv.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
     typer.echo(rendered)
 
 

@@ -91,3 +91,81 @@ class FeatureSnapshotAssembler:
         return evidence.model_copy(
             update={"values": values, "sources": sources, "source_as_of": source_as_of}
         )
+
+    def add_estimate_revision_features(
+        self, evidence: FeatureAssemblyInput, features: object
+    ) -> FeatureAssemblyInput:
+        """Attach revision evidence; every selected snapshot retains provenance."""
+        from smct_research.estimates.models import EstimateRevisionFeatures
+
+        if not isinstance(features, EstimateRevisionFeatures):
+            raise TypeError("features must be EstimateRevisionFeatures")
+        if features.as_of > evidence.as_of:
+            raise ValueError("estimate evidence cannot be newer than feature snapshot")
+        evidence_ticker = evidence.ticker.upper().strip()
+        if evidence_ticker != features.ticker or evidence_ticker != features.current.ticker:
+            raise ValueError("estimate feature ticker must match destination evidence ticker")
+        if features.metric != features.current.metric:
+            raise ValueError("estimate feature metric must match current estimate metric")
+        for lookback_days, revision in features.revisions.items():
+            if revision.requested_lookback_days != lookback_days:
+                raise ValueError("revision lookback key must match requested_lookback_days")
+            if revision.prior is None:
+                continue
+            if revision.prior.ticker != features.current.ticker:
+                raise ValueError("estimate prior ticker must match current estimate ticker")
+            if revision.prior.identity != features.current.identity:
+                raise ValueError("estimate prior identity must match current estimate identity")
+        selected = [
+            features.current,
+            *(revision.prior for revision in features.revisions.values() if revision.prior),
+        ]
+        if any(record.available_at > evidence.as_of for record in selected):
+            raise ValueError("estimate source cannot be newer than feature snapshot")
+        prefix = features.metric.value
+        values, sources, source_as_of = (
+            dict(evidence.values),
+            dict(evidence.sources),
+            dict(evidence.source_as_of),
+        )
+        values.update(
+            {
+                f"{prefix}_consensus_current": features.current.consensus,
+                f"{prefix}_revision_acceleration": features.acceleration,
+                f"{prefix}_revision_streak": features.streak,
+                f"{prefix}_analyst_count": features.current.analyst_count,
+                f"{prefix}_analyst_count_change_30d": features.analyst_count_change_30d,
+                f"{prefix}_high_change_30d": features.high_change_30d,
+                f"{prefix}_low_change_30d": features.low_change_30d,
+                f"{prefix}_dispersion_current": features.current.standard_deviation,
+                f"{prefix}_dispersion_change_30d": features.dispersion_change_30d,
+                f"{prefix}_dispersion_change_ratio_30d": features.dispersion_change_ratio_30d,
+                f"{prefix}_estimate_breadth_change_30d": features.breadth_change_30d,
+                f"{prefix}_consensus_age_days": features.days_since_latest_update,
+                f"{prefix}_sign_transition": features.sign_transition,
+                f"{prefix}_revision_quality_score": features.quality.score,
+                f"{prefix}_revision_coverage_percentage": features.quality.coverage_percentage,
+                f"{prefix}_target_period_end": features.current.target_period_end.isoformat(),
+                f"{prefix}_target_period_rollover": "target_period_rollover"
+                in features.diagnostics,
+                f"{prefix}_revision_diagnostics": ";".join(features.diagnostics),
+            }
+        )
+        for days, revision in features.revisions.items():
+            values[f"{prefix}_revision_{days}d"] = revision.value
+            if revision.prior:
+                key = (
+                    f"estimates:{prefix}:{days}d:{revision.prior.provider}:"
+                    f"{revision.prior.provider_record_id}"
+                )
+                sources[key] = revision.prior.source_identifier
+                source_as_of[key] = revision.prior.available_at
+        key = (
+            f"estimates:{prefix}:current:{features.current.provider}:"
+            f"{features.current.provider_record_id}"
+        )
+        sources[key] = features.current.source_identifier
+        source_as_of[key] = features.current.available_at
+        return evidence.model_copy(
+            update={"values": values, "sources": sources, "source_as_of": source_as_of}
+        )

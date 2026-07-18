@@ -39,7 +39,7 @@ def test_batch_ranking_missing_coverage_and_point_in_time() -> None:
         companies, {"BETA": snapshot}, UniversePolicy(), datetime(2026, 7, 17, tzinfo=UTC)
     )
     beta = next(item for item in results if item.ticker == "BETA")
-    assert beta.rank == 1 and beta.signals_evaluated == 1 and beta.signals_unavailable == 6
+    assert beta.rank == 1 and beta.signals_evaluated == 1 and beta.signals_unavailable == 7
     assert beta.feature_completeness_percentage < 100
 
 
@@ -96,7 +96,7 @@ def test_future_snapshot_and_source_are_not_evaluated() -> None:
             [company], {company.ticker: snapshot}, UniversePolicy(), evaluation
         )[0]
         assert result.signals_evaluated == 0
-        assert result.signals_unavailable == 7
+        assert result.signals_unavailable == 8
         assert result.composite_score is None
         assert result.point_in_time_eligibility_warnings
 
