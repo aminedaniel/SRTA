@@ -15,6 +15,7 @@ from smct_research.estimates.models import (
     EstimateBasis,
     EstimateMetric,
     EstimatePeriod,
+    EstimateRevision,
 )
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
@@ -121,7 +122,7 @@ def test_point_in_time_lookback_tolerance_and_no_future_selection() -> None:
 
 def test_series_isolation_and_explicit_ambiguity() -> None:
     records = history() + history(provider="p2")
-    with pytest.raises(ValueError, match="provider, basis, and period_type"):
+    with pytest.raises(ValueError, match="multiple estimate series"):
         calculate_features(records, "ACME", EstimateMetric.EPS, ts("2026-04-01T00:00:00Z"))
     selected = calculate_features(
         records, "ACME", EstimateMetric.EPS, ts("2026-04-01T00:00:00Z"), provider="p2"
@@ -136,7 +137,7 @@ def test_series_isolation_and_explicit_ambiguity() -> None:
             ts("2026-04-01T00:00:00Z"),
         )
 
-    with pytest.raises(ValueError, match="provider, basis, and period_type"):
+    with pytest.raises(ValueError, match="multiple estimate series"):
         calculate_features(
             history() + history(basis=EstimateBasis.GAAP),
             "ACME",
@@ -144,7 +145,7 @@ def test_series_isolation_and_explicit_ambiguity() -> None:
             ts("2026-04-01T00:00:00Z"),
         )
 
-    with pytest.raises(ValueError, match="provider, basis, and period_type"):
+    with pytest.raises(ValueError, match="multiple estimate series"):
         calculate_features(
             history() + history(period_type=EstimatePeriod.QUARTER),
             "ACME",
@@ -440,7 +441,7 @@ def test_cli_selectors_json_csv_and_controlled_errors(tmp_path: Path) -> None:
         app, ["revisions", str(path), "--ticker", "ACME", "--as-of", "2026-04-01T00:00:00Z"]
     )
     assert ambiguous.exit_code != 0
-    assert "required" in ambiguous.output or "provider, basis, and period_type" in ambiguous.output
+    assert "required" in ambiguous.output or "multiple estimate series" in ambiguous.output
     assert "Traceback" not in ambiguous.output
 
     output_json = tmp_path / "out.json"
@@ -538,7 +539,169 @@ def test_a3_metric_scoped_quality_scoring_and_composite_confidence() -> None:
         )
     )
     assert neutral.direction == SignalDirection.NEUTRAL
+    assert "deteriorating" not in neutral.thesis
+    assert "decisive directional trend" in neutral.thesis
 
     composite = CompositeResearchScorer().score([result])
     assert composite.score == pytest.approx(50 + result.score / 2)
     assert default_registry().evaluate_all(FeatureSnapshot(ticker="MISS", values={})) == []
+
+
+def test_feature_validation_and_assembler_reject_cross_series_contamination() -> None:
+    features = calculate_features(history(), "ACME", EstimateMetric.EPS, ts("2026-04-01T00:00:00Z"))
+    assembler = FeatureSnapshotAssembler()
+    acme_evidence = FeatureAssemblyInput(ticker="ACME", as_of=ts("2026-04-01T00:00:00Z"))
+    beta_evidence = FeatureAssemblyInput(ticker="BETA", as_of=ts("2026-04-01T00:00:00Z"))
+
+    with pytest.raises(ValueError, match="destination evidence ticker"):
+        assembler.add_estimate_revision_features(beta_evidence, features)
+
+    ticker_mismatch = features.model_copy(update={"ticker": "BETA"})
+    with pytest.raises(ValueError, match="ticker"):
+        type(features).model_validate(ticker_mismatch.model_dump())
+    with pytest.raises(ValueError, match="destination evidence ticker"):
+        assembler.add_estimate_revision_features(acme_evidence, ticker_mismatch)
+
+    current_ticker_mismatch = features.model_copy(
+        update={"current": features.current.model_copy(update={"ticker": "BETA"})}
+    )
+    with pytest.raises(ValueError, match="ticker"):
+        type(features).model_validate(current_ticker_mismatch.model_dump())
+    with pytest.raises(ValueError, match="destination evidence ticker"):
+        assembler.add_estimate_revision_features(acme_evidence, current_ticker_mismatch)
+
+    bad_key = features.model_copy(
+        update={"revisions": {30: EstimateRevision(requested_lookback_days=15)}}
+    )
+    with pytest.raises(ValueError, match="lookback"):
+        type(features).model_validate(bad_key.model_dump())
+    with pytest.raises(ValueError, match="lookback"):
+        assembler.add_estimate_revision_features(acme_evidence, bad_key)
+
+    bad_priors = [
+        features.revisions[30].prior.model_copy(update={"ticker": "BETA"}),
+        features.revisions[30].prior.model_copy(update={"provider": "p2"}),
+        features.revisions[30].prior.model_copy(update={"target_period_end": date(2027, 12, 31)}),
+        features.revisions[30].prior.model_copy(update={"basis": EstimateBasis.GAAP}),
+        features.revisions[30].prior.model_copy(update={"period_type": EstimatePeriod.QUARTER}),
+        features.revisions[30].prior.model_copy(update={"unit": "USD"}),
+        features.revisions[30].prior.model_copy(update={"currency": "EUR"}),
+    ]
+    for bad_prior in bad_priors:
+        contaminated = features.model_copy(
+            update={
+                "revisions": {
+                    **features.revisions,
+                    30: features.revisions[30].model_copy(update={"prior": bad_prior}),
+                }
+            }
+        )
+        with pytest.raises(ValueError, match="ticker|identity"):
+            type(features).model_validate(contaminated.model_dump())
+        with pytest.raises(ValueError, match="ticker|identity"):
+            assembler.add_estimate_revision_features(acme_evidence, contaminated)
+
+
+def test_unit_and_currency_filters_disambiguate_series() -> None:
+    base = history()
+    unit_series = [
+        record.model_copy(
+            update={"provider_record_id": f"unit-{record.provider_record_id}", "unit": "USD"}
+        )
+        for record in history()
+    ]
+    currency_series = [
+        record.model_copy(
+            update={
+                "provider_record_id": f"eur-{record.provider_record_id}",
+                "currency": "EUR",
+            }
+        )
+        for record in history()
+    ]
+
+    with pytest.raises(ValueError, match="multiple estimate series"):
+        calculate_features(
+            base + unit_series, "ACME", EstimateMetric.EPS, ts("2026-04-01T00:00:00Z")
+        )
+    selected_unit = calculate_features(
+        base + unit_series,
+        "ACME",
+        EstimateMetric.EPS,
+        ts("2026-04-01T00:00:00Z"),
+        unit=" USD ",
+    )
+    assert selected_unit.current.unit == "USD"
+
+    with pytest.raises(ValueError, match="multiple estimate series"):
+        calculate_features(
+            base + currency_series, "ACME", EstimateMetric.EPS, ts("2026-04-01T00:00:00Z")
+        )
+    selected_currency = calculate_features(
+        base + currency_series,
+        "ACME",
+        EstimateMetric.EPS,
+        ts("2026-04-01T00:00:00Z"),
+        currency=" eur ",
+    )
+    assert selected_currency.current.currency == "EUR"
+
+
+def test_cli_unit_and_currency_selectors(tmp_path: Path) -> None:
+    runner = CliRunner()
+    path = tmp_path / "unit_currency.json"
+    unit_series = [
+        record.model_copy(
+            update={"provider_record_id": f"unit-{record.provider_record_id}", "unit": "USD"}
+        )
+        for record in history()
+    ]
+    currency_series = [
+        record.model_copy(
+            update={
+                "provider_record_id": f"eur-{record.provider_record_id}",
+                "currency": "EUR",
+            }
+        )
+        for record in history()
+    ]
+    write_json(path, history() + unit_series + currency_series)
+
+    ambiguous = runner.invoke(
+        app, ["revisions", str(path), "--ticker", "ACME", "--as-of", "2026-04-01T00:00:00Z"]
+    )
+    assert ambiguous.exit_code != 0
+    assert "multiple estimate series" in ambiguous.output
+    assert "Traceback" not in ambiguous.output
+
+    unit_selected = runner.invoke(
+        app,
+        [
+            "revisions",
+            str(path),
+            "--ticker",
+            "ACME",
+            "--as-of",
+            "2026-04-01T00:00:00Z",
+            "--unit",
+            "USD",
+        ],
+    )
+    assert unit_selected.exit_code == 0, unit_selected.output
+    assert json.loads(unit_selected.output)["current"]["unit"] == "USD"
+
+    currency_selected = runner.invoke(
+        app,
+        [
+            "revisions",
+            str(path),
+            "--ticker",
+            "ACME",
+            "--as-of",
+            "2026-04-01T00:00:00Z",
+            "--currency",
+            "eur",
+        ],
+    )
+    assert currency_selected.exit_code == 0, currency_selected.output
+    assert json.loads(currency_selected.output)["current"]["currency"] == "EUR"

@@ -102,6 +102,20 @@ class FeatureSnapshotAssembler:
             raise TypeError("features must be EstimateRevisionFeatures")
         if features.as_of > evidence.as_of:
             raise ValueError("estimate evidence cannot be newer than feature snapshot")
+        evidence_ticker = evidence.ticker.upper().strip()
+        if evidence_ticker != features.ticker or evidence_ticker != features.current.ticker:
+            raise ValueError("estimate feature ticker must match destination evidence ticker")
+        if features.metric != features.current.metric:
+            raise ValueError("estimate feature metric must match current estimate metric")
+        for lookback_days, revision in features.revisions.items():
+            if revision.requested_lookback_days != lookback_days:
+                raise ValueError("revision lookback key must match requested_lookback_days")
+            if revision.prior is None:
+                continue
+            if revision.prior.ticker != features.current.ticker:
+                raise ValueError("estimate prior ticker must match current estimate ticker")
+            if revision.prior.identity != features.current.identity:
+                raise ValueError("estimate prior identity must match current estimate identity")
         selected = [
             features.current,
             *(revision.prior for revision in features.revisions.values() if revision.prior),

@@ -35,15 +35,20 @@ class ConsensusEstimateRevisionSignal(ResearchSignal):
             if score < -2
             else SignalDirection.NEUTRAL
         )
+        thesis = {
+            SignalDirection.POSITIVE: "Consensus estimates are improving.",
+            SignalDirection.NEGATIVE: "Consensus estimates are deteriorating or stale.",
+            SignalDirection.NEUTRAL: (
+                "Consensus revisions do not show a decisive directional trend."
+            ),
+        }[direction]
         return SignalResult(
             signal_id=self.id,
             ticker=snapshot.ticker,
             score=score,
             confidence=quality,
             direction=direction,
-            thesis="Consensus estimates are improving."
-            if score > 2
-            else "Consensus estimates are deteriorating or stale.",
+            thesis=thesis,
             evidence=[f"30-day EPS revision: {rev:.1%}.", f"Quality score: {quality:.0%}."],
             risks=["Consensus estimates are evidence, not trade instructions."],
             metadata={

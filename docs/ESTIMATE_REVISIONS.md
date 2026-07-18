@@ -26,9 +26,9 @@ A2; no revision or DCF value is silently blended into the other signal in this r
 
 ## CLI selectors and stable identity
 
-Use `smct revisions HISTORY --ticker TICKER --as-of TIMESTAMP` for a single unambiguous series. If a file contains multiple stable identities, add selectors such as `--provider`, `--basis gaap|non_gaap|provider_defined`, `--period-type quarter|fiscal_year`, and `--period-end YYYY-MM-DD` rather than letting the CLI choose a provider or accounting basis arbitrarily.
+Use `smct revisions HISTORY --ticker TICKER --as-of TIMESTAMP` for a single unambiguous series. If a file contains multiple stable identities, add selectors such as `--provider`, `--basis gaap|non_gaap|provider_defined`, `--period-type quarter|fiscal_year`, `--period-end YYYY-MM-DD`, `--unit "USD/share"`, and `--currency usd` rather than letting the CLI choose a provider or accounting basis arbitrarily.
 
-A stable estimate-revision series is identified by provider, ticker, metric, target fiscal-period end, period type, unit, currency, and basis. Horizon labels such as `FY1` are retained only as metadata and rollover diagnostics; they are never enough to compare two consensus values. Rollover diagnostics are emitted only when the same provider, basis, period type, unit, currency, metric, ticker, and horizon label move to a different target period.
+A stable estimate-revision series is identified by provider, ticker, metric, target fiscal-period end, period type, unit, currency, and basis. When a file contains otherwise identical series in different reporting units or currencies, select them explicitly with `--unit` and/or `--currency` (currency input is normalized to uppercase). Horizon labels such as `FY1` are retained only as metadata and rollover diagnostics; they are never enough to compare two consensus values. Rollover diagnostics are emitted only when the same provider, basis, period type, unit, currency, metric, ticker, and horizon label move to a different target period.
 
 ## Raw diagnostics versus normalized scoring features
 

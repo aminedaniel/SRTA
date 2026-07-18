@@ -267,6 +267,8 @@ def revisions(
     provider: str | None = typer.Option(None),
     basis: EstimateBasis | None = typer.Option(None),  # noqa: B008
     period_type: EstimatePeriod | None = typer.Option(None),  # noqa: B008
+    unit: str | None = typer.Option(None),
+    currency: str | None = typer.Option(None),
     output_json: Path | None = typer.Option(None),  # noqa: B008
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     lookback_tolerance_days: int = typer.Option(7, min=0),
@@ -286,6 +288,8 @@ def revisions(
             provider=provider,
             basis=basis,
             period_type=period_type,
+            unit=unit,
+            currency=currency,
         )
     except (ProviderResponseError, ValueError, OSError, TypeError) as error:
         raise typer.BadParameter(str(error)) from error

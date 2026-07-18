@@ -147,10 +147,24 @@ class EstimateRevisionFeatures(BaseModel):
     @model_validator(mode="after")
     def validate_point_in_time(self):
         self.as_of = normalize_utc(self.as_of)
+        self.ticker = self.ticker.upper().strip()
+        if self.ticker != self.current.ticker:
+            raise ValueError("revision feature ticker must match current estimate ticker")
+        if self.metric != self.current.metric:
+            raise ValueError("revision feature metric must match current estimate metric")
         if self.current.available_at > self.as_of:
             raise ValueError("current estimate is not available as_of")
-        if any(
-            item.prior and item.prior.available_at > self.as_of for item in self.revisions.values()
-        ):
-            raise ValueError("historical estimate is not available as_of")
+        for lookback_days, revision in self.revisions.items():
+            if revision.requested_lookback_days != lookback_days:
+                raise ValueError("revision lookback key must match requested_lookback_days")
+            if revision.prior is None:
+                continue
+            if revision.prior.available_at > self.as_of:
+                raise ValueError("historical estimate is not available as_of")
+            if revision.prior.ticker != self.current.ticker:
+                raise ValueError("historical estimate ticker must match current estimate ticker")
+            if revision.prior.identity != self.current.identity:
+                raise ValueError(
+                    "historical estimate identity must match current estimate identity"
+                )
         return self

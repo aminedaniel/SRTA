@@ -75,8 +75,12 @@ def calculate_features(
     provider: str | None = None,
     basis: EstimateBasis | None = None,
     period_type: EstimatePeriod | None = None,
+    unit: str | None = None,
+    currency: str | None = None,
 ) -> EstimateRevisionFeatures:
     as_of = normalize_utc(as_of)
+    normalized_unit = unit.strip() if unit is not None else None
+    normalized_currency = currency.upper().strip() if currency is not None else None
     eligible = [
         x
         for x in records
@@ -88,6 +92,10 @@ def calculate_features(
         eligible = [x for x in eligible if x.basis == basis]
     if period_type is not None:
         eligible = [x for x in eligible if x.period_type == period_type]
+    if normalized_unit is not None:
+        eligible = [x for x in eligible if x.unit == normalized_unit]
+    if normalized_currency is not None:
+        eligible = [x for x in eligible if x.currency == normalized_currency]
     periods = {x.target_period_end for x in eligible}
     if period_end is None and len(periods) > 1:
         raise ValueError("period_end is required when multiple eligible target periods exist")
@@ -97,7 +105,8 @@ def calculate_features(
     identities = {x.identity for x in eligible}
     if len(identities) > 1:
         raise ValueError(
-            "provider, basis, and period_type selection is required for multiple estimate series"
+            "provider, basis, period_type, unit, currency, or period_end selection is required "
+            "for multiple estimate series"
         )
     current = max(eligible, key=lambda x: (x.available_at, x.provider_record_id))
     series = [x for x in eligible if x.identity == current.identity]
