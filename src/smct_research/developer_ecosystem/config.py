@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from importlib.resources import files
 from pathlib import Path
@@ -48,7 +49,6 @@ class MinimumHistoryConfig(BaseModel):
 class B1ScoringWeightsConfig(BaseModel):
     contributor_growth: float = 0.28
     external_contributor_growth: float = 0.18
-    package_download_growth: float = 0.18
     maintenance_backlog_penalty: float = 0.18
     breadth_bonus_cap: float = 0.10
     bot_penalty: float = 0.15
@@ -95,8 +95,36 @@ class DeveloperEcosystemConfig(BaseModel):
     def validate_semantics(self) -> DeveloperEcosystemConfig:
         if self.observation_window_tolerance_days < 0:
             raise ValueError("observation_window_tolerance_days must be nonnegative")
+        if len(set(self.lookback_windows_days)) != len(self.lookback_windows_days):
+            raise ValueError("lookback windows must be unique")
+        if self.staleness_thresholds.fresh_days < 0:
+            raise ValueError("fresh_days must be nonnegative")
         if self.staleness_thresholds.fresh_days >= self.staleness_thresholds.stale_days:
             raise ValueError("fresh_days must be less than stale_days")
+        if self.minimum_history_requirements.minimum_mapped_repositories < 1:
+            raise ValueError("minimum_mapped_repositories must be at least one")
+        if self.minimum_history_requirements.preferred_windows_days <= 0:
+            raise ValueError("preferred_windows_days must be positive")
+        shares = [
+            self.contributor_concentration_penalties.top_one_warning_share,
+            self.contributor_concentration_penalties.top_one_high_risk_share,
+        ]
+        if any(not math.isfinite(value) or value < 0 or value > 1 for value in shares):
+            raise ValueError("concentration shares must be finite values between 0 and 1")
+        numeric_groups = [
+            *self.repository_role_weights.values(),
+            self.star_spike_diagnostics.spike_growth_threshold,
+            self.star_spike_diagnostics.corroborating_growth_threshold,
+            self.package_adoption_weights.download_growth,
+            self.package_adoption_weights.dependent_package_growth,
+            self.b1_scoring_weights.contributor_growth,
+            self.b1_scoring_weights.external_contributor_growth,
+            self.b1_scoring_weights.maintenance_backlog_penalty,
+            self.b1_scoring_weights.breadth_bonus_cap,
+            self.b1_scoring_weights.bot_penalty,
+        ]
+        if any(not math.isfinite(value) or value < 0 for value in numeric_groups):
+            raise ValueError("weights and thresholds must be finite nonnegative values")
         for pattern in self.bot_filtering.bot_login_patterns:
             re.compile(pattern)
         return self

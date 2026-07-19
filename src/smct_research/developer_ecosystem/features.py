@@ -5,6 +5,7 @@ import json
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -98,10 +99,8 @@ def _mapping_key(mapping: RepositoryMapping) -> str:
 def _mapping_covers_interval(
     mapping: RepositoryMapping, obs: RepositoryObservation | PackageObservation
 ) -> bool:
-    return (
-        mapping.known_at <= obs.available_at
-        and mapping.effective_from <= obs.observation_window_start
-        and (mapping.effective_to is None or mapping.effective_to >= obs.observation_window_end)
+    return mapping.effective_from <= obs.observation_window_start and (
+        mapping.effective_to is None or mapping.effective_to >= obs.observation_window_end
     )
 
 
@@ -123,14 +122,18 @@ def _resolve_repository_mapping(
         return None, "unmapped"
     max_spec = max(_mapping_specificity(m) for m in active)
     strongest = [m for m in active if _mapping_specificity(m) == max_spec]
+    distinct = {_mapping_identity(m) for m in strongest}
+    includes = [m for m in strongest if m.include]
     exclusions = [m for m in strongest if not m.include]
-    if exclusions:
-        if len({_mapping_identity(m) for m in strongest}) > 1 and len(strongest) > 2:
-            raise ValueError(f"ambiguous repository mapping for {obs.repo_key}")
-        return exclusions[0], "excluded"
-    if len({_mapping_identity(m) for m in strongest}) > 1:
+    if len(includes) > 1 or len(exclusions) > 1:
         raise ValueError(f"ambiguous repository mapping for {obs.repo_key}")
-    return strongest[0], None
+    if includes and exclusions:
+        return exclusions[0], "excluded"
+    if len(distinct) > 1:
+        raise ValueError(f"ambiguous repository mapping for {obs.repo_key}")
+    if exclusions:
+        return exclusions[0], "excluded"
+    return includes[0], None
 
 
 def _status_exclusion(obs: RepositoryObservation, mapping: RepositoryMapping) -> str | None:
@@ -224,7 +227,6 @@ def _normalize_package_name(pkg: PackageObservation) -> str:
 
 def _package_matches_mapping(pkg: PackageObservation, mapping: RepositoryMapping) -> bool:
     normalized = _normalize_package_name(pkg)
-    legacy = normalized in {name.strip().lower() for name in mapping.package_names}
     selectors = [
         selector
         for selector in mapping.package_selectors
@@ -232,8 +234,16 @@ def _package_matches_mapping(pkg: PackageObservation, mapping: RepositoryMapping
         and selector.package_name == normalized
         and (selector.provider is None or selector.provider == pkg.provider)
         and (selector.repository_id is None or selector.repository_id == pkg.repository_id)
+        and (
+            selector.repository_owner is None
+            or selector.repository_owner.lower() == (pkg.repository_owner or "").lower()
+        )
+        and (
+            selector.repository_name is None
+            or selector.repository_name.lower() == (pkg.repository_name or "").lower()
+        )
     ]
-    return legacy or bool(selectors)
+    return bool(selectors)
 
 
 def _select_packages(
@@ -266,7 +276,18 @@ def _select_packages(
         identities = {_mapping_identity(m) for m in matches}
         if len(identities) > 1:
             raise ValueError(f"ambiguous package mapping for {pkg.ecosystem}:{pkg.package_name}")
-        if pkg.repository_id and pkg.repository_id not in selected_repo_ids:
+        mapping_has_repo_selector = any(
+            (
+                matches[0].repository_id,
+                matches[0].owner and matches[0].name,
+                matches[0].organization,
+            )
+        )
+        if (
+            pkg.repository_id
+            and mapping_has_repo_selector
+            and pkg.repository_id not in selected_repo_ids
+        ):
             diagnostics.append(
                 f"package linked to excluded or wrong repository: {pkg.package_name}"
             )
@@ -301,6 +322,13 @@ def _canonical_package_window(
                 days,
             )
         ].append(item)
+    package_to_providers: dict[tuple[str, str, str, int], set[str]] = defaultdict(set)
+    for provider, ecosystem, package_name, repository_id, grain in grouped:
+        package_to_providers[(ecosystem, package_name, repository_id, grain)].add(provider)
+    ambiguous = [key for key, providers in package_to_providers.items() if len(providers) > 1]
+    if ambiguous:
+        label = ", ".join(f"{a[0]}:{a[1]}:{a[2]}:{a[3]}d" for a in sorted(ambiguous))
+        raise ValueError(f"ambiguous multi-provider package series: {label}")
     return [
         sorted(
             items,
@@ -466,6 +494,32 @@ def _matched_package_pairs(
     return [cur_by_key[key] for key in matched], [prior_by_key[key] for key in matched], diagnostics
 
 
+def _matched_repo_growth(
+    current: list[SelectedRepositoryObservation],
+    prior: list[SelectedRepositoryObservation],
+    days: int,
+    value: Callable[[SelectedRepositoryObservation], float],
+) -> float | None:
+    matched_current, matched_prior, _ = _matched_repo_pairs(current, prior, days)
+    if not matched_current or not matched_prior:
+        return None
+    return safe_relative_change(
+        sum(value(item) for item in matched_current), sum(value(item) for item in matched_prior)
+    )
+
+
+def _matched_package_growth(
+    current: list[SelectedPackageObservation],
+    prior: list[SelectedPackageObservation],
+    days: int,
+    attr: str,
+) -> float | None:
+    matched_current, matched_prior, _ = _matched_package_pairs(current, prior, days)
+    current_value = _package_sum(matched_current, attr)
+    prior_value = _package_sum(matched_prior, attr)
+    return safe_relative_change(current_value, prior_value)
+
+
 def calculate_developer_ecosystem_features(
     repo_observations: list[RepositoryObservation],
     mappings: list[RepositoryMapping],
@@ -507,7 +561,7 @@ def calculate_developer_ecosystem_features(
             current90 = cur
             current90_packages = pkg_cur
         if cur:
-            used_repo.extend(cur + prior)
+            used_repo.extend(cur + matched_prior)
             active = _weighted_sum(cur, "active_contributor_count")
             prior_active = (
                 _weighted_sum(matched_prior, "active_contributor_count") if matched_prior else None
@@ -521,8 +575,8 @@ def calculate_developer_ecosystem_features(
             commits_adj = _weighted_sum(cur, "commit_count", adjusted=True)
             releases = sum(o.observation.releases.release_count * o.weight for o in cur)
             prior_releases = (
-                sum(o.observation.releases.release_count * o.weight for o in prior)
-                if prior
+                sum(o.observation.releases.release_count * o.weight for o in matched_prior)
+                if matched_prior
                 else None
             )
             issues_open = sum(o.observation.issues.opened_count * o.weight for o in cur)
@@ -533,13 +587,13 @@ def calculate_developer_ecosystem_features(
                 else None
             )
             prior_stars = (
-                sum(o.observation.popularity.stargazer_count * o.weight for o in prior)
-                if prior
+                sum(o.observation.popularity.stargazer_count * o.weight for o in matched_prior)
+                if matched_prior
                 else None
             )
             prior_forks = (
-                sum(o.observation.popularity.fork_count * o.weight for o in prior)
-                if prior
+                sum(o.observation.popularity.fork_count * o.weight for o in matched_prior)
+                if matched_prior
                 else None
             )
             features.update(
@@ -610,7 +664,7 @@ def calculate_developer_ecosystem_features(
             ):
                 features[f"developer_{key}_{days}d"] = None
         if pkg_cur:
-            used_pkg.extend(pkg_cur + pkg_prior)
+            used_pkg.extend(pkg_cur + matched_pkg_prior)
             downloads = _package_sum(matched_pkg_cur, "download_count")
             prior_downloads = (
                 _package_sum(matched_pkg_prior, "download_count") if matched_pkg_prior else None
@@ -747,24 +801,27 @@ def calculate_developer_ecosystem_features(
         key = _package_provenance_key(pkg_obs)
         provenance[key] = _provenance_payload(pkg_obs)
         source_as_of[key] = pkg_obs.available_at
+        map_key = _mapping_key(selected_package.mapping)
+        provenance[map_key] = _mapping_identity(selected_package.mapping)
+        source_as_of[map_key] = selected_package.mapping.known_at
     for item in current90:
         obs = item.observation
         if obs.imported_history:
             diagnostics.append("repository import history flagged")
         if _noise_share(obs) >= 0.5:
             diagnostics.append("generated or automated activity is elevated")
+    primary_window = 90
+    eligible_primary = _canonical_repo_window(
+        selected, as_of, primary_window, False, config
+    ) + _canonical_repo_window(selected, as_of, primary_window, True, config)
+    eligible_repo_ids = {item.observation.repository_id for item in eligible_primary}
     current_repo_ids = {item.observation.repository_id for item in current90}
-    repo_denominator = max(
-        1,
-        len(
-            {
-                (m.provider, m.organization or m.owner or "", m.name or m.repository_id or "*")
-                for m in mappings
-                if m.ticker == ticker and m.include and m.is_effective(as_of)
-            }
-        ),
+    matched_repo_ids = (
+        {item.observation.repository_id for item in matched_cur}
+        if "matched_cur" in locals()
+        else set()
     )
-    completeness = min(1.0, len(current_repo_ids) / repo_denominator)
+    completeness = min(1.0, len(current_repo_ids) / max(1, len(eligible_repo_ids)))
     used_freshness_values = [
         (as_of - source_as_of[key]).days
         for key in source_as_of
@@ -784,15 +841,29 @@ def calculate_developer_ecosystem_features(
     has_current_package = (
         bool(current90_packages) and features.get("developer_package_downloads_90d") is not None
     )
+    directional_keys = (
+        "developer_active_contributor_growth_90d",
+        "developer_external_contributor_growth_90d",
+        "developer_release_growth_90d",
+        "developer_issue_backlog_growth_90d",
+        "developer_fork_growth_90d",
+        "developer_package_download_growth_90d",
+        "developer_dependent_package_growth_90d",
+    )
+    has_directional_evidence = any(features.get(key) is not None for key in directional_keys)
+    if not has_directional_evidence:
+        diagnostics.append("insufficient matched directional history")
+        features["developer_momentum_quality_score"] = None
     if len(current_repo_ids) < config.minimum_history_requirements.minimum_mapped_repositories:
         diagnostics.append("minimum mapped repository requirement not met")
         quality_score = 0.0
         features["developer_momentum_quality_score"] = None
     preferred = config.minimum_history_requirements.preferred_windows_days
-    if (
-        preferred not in window_values
-        or features.get(f"developer_active_contributors_{preferred}d") is None
-    ):
+    preferred_available = (
+        preferred in window_values
+        and features.get(f"developer_active_contributors_{preferred}d") is not None
+    )
+    if not preferred_available:
         diagnostics.append("preferred history window unavailable")
     confidence = max(
         0.0,
@@ -804,6 +875,7 @@ def calculate_developer_ecosystem_features(
             + 0.10 * has_current_package
             + 0.15 * completeness
             + 0.10 * freshness_score
+            - (0.10 if not preferred_available else 0.0)
             + 0.05
             * (
                 float(features["developer_cross_source_agreement"] or 0)
@@ -831,6 +903,10 @@ def calculate_developer_ecosystem_features(
         metadata={
             "windows": list(window_values),
             "mapped_repositories": len(current_repo_ids),
+            "eligible_repository_count": len(eligible_repo_ids),
+            "current_repository_count": len(current_repo_ids),
+            "matched_repository_count": len(matched_repo_ids),
+            "repository_coverage_ratio": completeness,
             "package_observations": len(current90_packages),
             "observation_grain_tolerance_days": config.observation_window_tolerance_days,
         },

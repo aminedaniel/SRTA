@@ -90,23 +90,13 @@ def _logical_key(
             "pkg",
             item.provider,
             item.ecosystem.value,
-            item.package_name,
+            item.package_name.strip().lower(),
+            item.repository_id or "",
             item.observation_window_start.isoformat(),
             item.observation_window_end.isoformat(),
             item.available_at.isoformat(),
         )
-    return (
-        "map",
-        item.provider,
-        item.ticker,
-        item.repository_id or "",
-        item.owner or "",
-        item.name or "",
-        item.organization or "",
-        ",".join(item.package_names),
-        item.effective_from.isoformat(),
-        item.known_at.isoformat(),
-    )
+    return ("map", _canonical_payload(item))
 
 
 def _dedupe(items: list[T]) -> list[T]:

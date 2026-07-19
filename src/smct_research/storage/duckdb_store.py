@@ -284,7 +284,7 @@ def store_package_observations(
 ) -> None:
     for item in observations:
         payload = item.model_dump_json()
-        logical = f"{item.ecosystem}|{item.package_name}|{item.observation_window_start.isoformat()}|{item.observation_window_end.isoformat()}|{item.available_at.isoformat()}"
+        logical = f"{item.provider}|{item.ecosystem}|{item.package_name.strip().lower()}|{item.repository_id or ''}|{item.observation_window_start.isoformat()}|{item.observation_window_end.isoformat()}|{item.available_at.isoformat()}"
         _store_immutable_json(
             self,
             "developer_package_observations",
@@ -311,7 +311,7 @@ def store_repository_mappings(
     for item in mappings:
         payload = item.model_dump_json()
         provider_record_id = _json_identity(item)
-        logical = f"{item.ticker}|{item.provider}|{item.organization}|{item.owner}|{item.name}|{item.repository_id}|{item.effective_from.isoformat()}|{item.known_at.isoformat()}"
+        logical = json.dumps(item.model_dump(mode="json"), sort_keys=True)
         _store_immutable_json(
             self,
             "developer_repository_mappings",

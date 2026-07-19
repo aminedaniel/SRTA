@@ -1,5 +1,42 @@
 [
-  {"ticker":"ACME","provider":"github","organization":"acme","include":true,"role":"core product","weight":1.0,"is_first_party":true,"effective_from":"2025-01-01T00:00:00Z","known_at":"2025-01-01T00:00:00Z","package_names":["acme-sdk"]},
-  {"ticker":"ACME","provider":"github","owner":"outside","name":"acme-integration","include":true,"role":"integration","weight":0.7,"is_first_party":false,"effective_from":"2025-06-01T00:00:00Z","known_at":"2025-06-01T00:00:00Z"},
-  {"ticker":"BOLT","provider":"github","organization":"bolt","include":true,"role":"SDK","weight":0.8,"is_first_party":true,"effective_from":"2025-01-01T00:00:00Z","known_at":"2025-01-01T00:00:00Z"}
+  {
+    "ticker": "ACME",
+    "provider": "github",
+    "organization": "acme",
+    "include": true,
+    "role": "core product",
+    "weight": 1.0,
+    "is_first_party": true,
+    "effective_from": "2025-01-01T00:00:00Z",
+    "known_at": "2025-01-01T00:00:00Z",
+    "package_selectors": [
+      {
+        "ecosystem": "pypi",
+        "package_name": "acme-sdk"
+      }
+    ]
+  },
+  {
+    "ticker": "ACME",
+    "provider": "github",
+    "owner": "outside",
+    "name": "acme-integration",
+    "include": true,
+    "role": "integration",
+    "weight": 0.7,
+    "is_first_party": false,
+    "effective_from": "2025-06-01T00:00:00Z",
+    "known_at": "2025-06-01T00:00:00Z"
+  },
+  {
+    "ticker": "BOLT",
+    "provider": "github",
+    "organization": "bolt",
+    "include": true,
+    "role": "SDK",
+    "weight": 0.8,
+    "is_first_party": true,
+    "effective_from": "2025-01-01T00:00:00Z",
+    "known_at": "2025-01-01T00:00:00Z"
+  }
 ]

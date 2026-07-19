@@ -33,7 +33,6 @@ minimum_history_requirements:
 b1_scoring_weights:
   contributor_growth: 0.28
   external_contributor_growth: 0.18
-  package_download_growth: 0.18
   maintenance_backlog_penalty: 0.18
   breadth_bonus_cap: 0.10
   bot_penalty: 0.15

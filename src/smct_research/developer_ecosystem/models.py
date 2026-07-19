@@ -207,8 +207,24 @@ class PackageSelector(BaseModel, frozen=True):
     def normalize(self) -> PackageSelector:
         object.__setattr__(self, "package_name", self.package_name.strip().lower())
         if self.provider is not None:
-            object.__setattr__(self, "provider", self.provider.strip().lower())
-        object.__setattr__(self, "package_name", self.package_name.strip().lower())
+            provider = self.provider.strip().lower()
+            if not provider:
+                raise ValueError("package selector provider cannot be empty")
+            object.__setattr__(self, "provider", provider)
+        if self.repository_id is not None and not self.repository_id.strip():
+            raise ValueError("package selector repository_id cannot be empty")
+        if self.repository_owner is not None:
+            owner = self.repository_owner.strip()
+            if not owner:
+                raise ValueError("package selector repository_owner cannot be empty")
+            object.__setattr__(self, "repository_owner", owner)
+        if self.repository_name is not None:
+            name = self.repository_name.strip()
+            if not name:
+                raise ValueError("package selector repository_name cannot be empty")
+            if not self.repository_owner:
+                raise ValueError("package selector repository_name requires repository_owner")
+            object.__setattr__(self, "repository_name", name)
         return self
 
 
@@ -240,15 +256,9 @@ class RepositoryMapping(BaseModel, frozen=True):
         object.__setattr__(self, "provider", self.provider.strip().lower())
         if self.name and not self.owner:
             raise ValueError("repository name mappings require an owner")
-        if not any(
-            (
-                self.repository_id,
-                self.name,
-                self.organization,
-                self.package_names,
-                self.package_selectors,
-            )
-        ):
+        if self.package_names:
+            raise ValueError("package_names is deprecated; use package_selectors with ecosystem")
+        if not any((self.repository_id, self.name, self.organization, self.package_selectors)):
             raise ValueError("mapping requires repository, organization, or package selector")
         if self.effective_to is not None and self.effective_to < self.effective_from:
             raise ValueError("effective_to cannot be before effective_from")
@@ -263,6 +273,8 @@ class RepositoryMapping(BaseModel, frozen=True):
         )
 
     def matches(self, obs: RepositoryObservation) -> bool:
+        if not any((self.repository_id, self.owner and self.name, self.organization)):
+            return False
         if obs.provider != self.provider:
             return False
         if self.repository_id and obs.repository_id != self.repository_id:

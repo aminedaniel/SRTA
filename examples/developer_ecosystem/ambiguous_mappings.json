@@ -9,8 +9,11 @@
     "is_first_party": true,
     "effective_from": "2025-01-01T00:00:00Z",
     "known_at": "2025-01-01T00:00:00Z",
-    "package_names": [
-      "acme-sdk"
+    "package_selectors": [
+      {
+        "ecosystem": "pypi",
+        "package_name": "acme-sdk"
+      }
     ]
   },
   {
@@ -46,8 +49,11 @@
     "is_first_party": true,
     "effective_from": "2025-01-01T00:00:00Z",
     "known_at": "2025-01-01T00:00:00Z",
-    "package_names": [
-      "acme-sdk"
+    "package_selectors": [
+      {
+        "ecosystem": "pypi",
+        "package_name": "acme-sdk"
+      }
     ]
   }
 ]
