@@ -38,7 +38,7 @@ Archived repositories, mirrors, and forks are excluded by default. Forks can be 
 
 ## Package mapping rules
 
-Package evidence must match active approved company mappings through typed `package_selectors`; legacy `package_names` is rejected. Package repository identity is provider-scoped and may include repository ID, owner/name, or both. If a package is linked to a repository, that repository must resolve under the mapping's repository provider to the same selected, non-excluded repository. Packages linked to explicitly excluded, archived, mirrored, fork-disallowed, wrong-provider, or contradictory repositories are excluded with diagnostics. Unmapped packages produce diagnostics. Ambiguous package mappings fail clearly, and mapping effective/known dates apply to package evidence.
+Package evidence must match active approved company mappings through typed `package_selectors`; legacy `package_names` is rejected. Package repository identity is provider-scoped and may include repository ID, owner/name, or both. If a package is linked to a repository, that repository must resolve under the mapping's repository provider to the same selected, non-excluded repository for the package observation's own interval. Prior-period repository evidence cannot authorize a current-period package. Packages linked to explicitly excluded, archived, mirrored, fork-disallowed, wrong-provider, contradictory, or interval-mismatched repositories are excluded with diagnostics. Unmapped packages produce diagnostics. Ambiguous package mappings fail clearly, and mapping effective/known dates apply to package evidence.
 
 ## Metrics
 
@@ -118,7 +118,7 @@ Retained configuration fields are production-wired: lookback windows and toleran
 
 ## Repository-linked package evidence
 
-If a package observation declares `repository_id` or repository owner/name, that linked repository must resolve to an eligible, non-excluded repository in the supplied evidence universe. Explicit exclusions, archived repositories, mirrors, and forks without an active `RepositoryMapping.include_forks` override reject linked package evidence. Truly repository-independent package mappings remain valid only when the package observation declares no repository association.
+If a package observation declares `repository_id` or repository owner/name, that linked repository must resolve to an eligible, non-excluded repository observation covering the same interval as the package observation. Mapping knowledge time, full-interval effective-date coverage, mapping precedence, explicit exclusions, archived repositories, mirrors, and forks without an active `RepositoryMapping.include_forks` override all apply to that package interval. Truly repository-independent package mappings remain valid only when the package observation declares no repository association.
 
 ## Observation interval availability
 

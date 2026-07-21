@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,8 @@ def test_point_in_time_mapping_growth_bot_concentration_and_adoption() -> None:
     assert "future-ending observation excluded" in " ".join(result.diagnostics)
     assert result.features["developer_active_contributor_growth_90d"] is not None
     assert result.features["developer_external_contributor_growth_90d"] is not None
-    assert result.features["developer_package_download_growth_90d"] == pytest.approx(0.35)
+    assert result.features["developer_package_download_growth_90d"] is None
+    assert result.features["developer_package_downloads_90d"] == pytest.approx(1350)
     assert result.features["developer_contributor_concentration"] < 0.5
     assert result.features["developer_bot_activity_share"] > 0
     assert result.quality.score > 0.5
@@ -222,8 +223,17 @@ def test_missing_prior_and_package_download_missingness() -> None:
     zero_prior = pkgs[0].model_copy(
         update={"provider_record_id": "zero-download-prior", "download_count": 0}
     )
+    current_sdk = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
+    prior_sdk = current_sdk.model_copy(
+        update={
+            "provider_record_id": "acme-sdk-prior-for-package",
+            "observation_window_start": zero_prior.observation_window_start,
+            "observation_window_end": zero_prior.observation_window_end,
+            "available_at": zero_prior.available_at,
+        }
+    )
     zero_result = calculate_developer_ecosystem_features(
-        repos, maps, "ACME", AS_OF, [zero_current, zero_prior]
+        [*repos, prior_sdk], maps, "ACME", AS_OF, [zero_current, zero_prior]
     )
     assert zero_result.features["developer_package_download_growth_90d"] == 0
 
@@ -898,6 +908,7 @@ def test_package_series_identity_scopes_repository_provider_and_linkage(tmp_path
 
     repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
     core = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    core_prior = next(item for item in repos if item.provider_record_id == "acme-core-prior")
     sdk = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
     base_map = load_repository_mappings(EX / "mappings.json", "ACME")[0]
     repo_core = base_map.model_copy(
@@ -944,7 +955,7 @@ def test_package_series_identity_scopes_repository_provider_and_linkage(tmp_path
         }
     )
     mismatch = calculate_developer_ecosystem_features(
-        [core, sdk],
+        [core_prior, sdk],
         [repo_core, repo_sdk, package_map],
         "ACME",
         AS_OF,
@@ -1027,3 +1038,114 @@ def test_repository_mapping_deduplication_and_normalized_identity() -> None:
     conflicting = duplicate.model_copy(update={"weight": duplicate.weight + 0.1})
     with pytest.raises(ValueError, match="ambiguous repository mapping"):
         calculate_developer_ecosystem_features([core], [duplicate, conflicting], "ACME", AS_OF, [])
+
+
+def test_interval_specific_package_repository_authorization_transitions() -> None:
+    from smct_research.developer_ecosystem.models import PackageSelector
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    current_sdk = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
+    pkg_current = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")[
+        1
+    ]
+    base = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    package_map = base.model_copy(
+        update={
+            "organization": None,
+            "package_selectors": (
+                PackageSelector.model_validate({"ecosystem": "pypi", "package_name": "acme-sdk"}),
+            ),
+        }
+    )
+    current_repo_map = base.model_copy(
+        update={"organization": None, "repository_id": "r2", "package_selectors": ()}
+    )
+    prior_repo = current_sdk.model_copy(
+        update={
+            "provider_record_id": "prior-sdk-active",
+            "observation_window_start": datetime.fromisoformat("2026-01-18T00:00:00+00:00"),
+            "observation_window_end": datetime.fromisoformat("2026-04-17T00:00:00+00:00"),
+            "available_at": datetime.fromisoformat("2026-04-18T00:00:00+00:00"),
+        }
+    )
+
+    exact_exclusion = current_repo_map.model_copy(
+        update={"include": False, "effective_from": pkg_current.observation_window_start}
+    )
+    rejected = calculate_developer_ecosystem_features(
+        [prior_repo, current_sdk],
+        [current_repo_map, exact_exclusion, package_map],
+        "ACME",
+        AS_OF,
+        [pkg_current],
+    )
+    joined = " ".join(rejected.diagnostics)
+    assert "linked package evidence rejected" in joined
+    assert rejected.features["developer_package_downloads_90d"] is None
+    assert rejected.features["developer_package_download_growth_90d"] is None
+    assert not any("pkg-current" in key for key in rejected.provenance)
+    assert not any("pkg-current" in key for key in rejected.source_as_of)
+    assert rejected.metadata["matched_package_count"] == 0
+    assert rejected.metadata["package_observations"] == 0
+
+    for status_field in ("is_archived", "is_mirror", "is_fork"):
+        status_repo = current_sdk.model_copy(update={status_field: True})
+        status_result = calculate_developer_ecosystem_features(
+            [prior_repo, status_repo], [current_repo_map, package_map], "ACME", AS_OF, [pkg_current]
+        )
+        assert "linked package evidence rejected" in " ".join(status_result.diagnostics)
+        assert status_result.features["developer_package_downloads_90d"] is None
+
+    expired_exclusion = exact_exclusion.model_copy(
+        update={"effective_to": pkg_current.observation_window_start - timedelta(days=1)}
+    )
+    allowed = calculate_developer_ecosystem_features(
+        [current_sdk],
+        [current_repo_map, expired_exclusion, package_map],
+        "ACME",
+        AS_OF,
+        [pkg_current],
+    )
+    assert allowed.features["developer_package_downloads_90d"] == pytest.approx(1350)
+    assert any("pkg-current" in key for key in allowed.provenance)
+
+    shifted_repo = current_sdk.model_copy(
+        update={
+            "provider_record_id": "shifted-sdk-current",
+            "observation_window_start": current_sdk.observation_window_start + timedelta(days=3),
+        }
+    )
+    interval_mismatch = calculate_developer_ecosystem_features(
+        [shifted_repo], [current_repo_map, package_map], "ACME", AS_OF, [pkg_current]
+    )
+    assert "linked package evidence rejected" in " ".join(interval_mismatch.diagnostics)
+    interval_match = calculate_developer_ecosystem_features(
+        [current_sdk], [current_repo_map, package_map], "ACME", AS_OF, [pkg_current]
+    )
+    assert interval_match.features["developer_package_downloads_90d"] == pytest.approx(1350)
+
+    by_name = pkg_current.model_copy(
+        update={"repository_id": None, "repository_owner": "acme", "repository_name": "sdk"}
+    )
+    name_rejected = calculate_developer_ecosystem_features(
+        [prior_repo, current_sdk],
+        [current_repo_map, exact_exclusion, package_map],
+        "ACME",
+        AS_OF,
+        [by_name],
+    )
+    assert "linked package evidence rejected" in " ".join(name_rejected.diagnostics)
+    id_rejected = calculate_developer_ecosystem_features(
+        [prior_repo, current_sdk],
+        [current_repo_map, exact_exclusion, package_map],
+        "ACME",
+        AS_OF,
+        [pkg_current],
+    )
+    assert "linked package evidence rejected" in " ".join(id_rejected.diagnostics)
+
+    independent = pkg_current.model_copy(update={"repository_id": None})
+    independent_result = calculate_developer_ecosystem_features(
+        [], [package_map], "ACME", AS_OF, [independent]
+    )
+    assert independent_result.features["developer_package_downloads_90d"] == pytest.approx(1350)

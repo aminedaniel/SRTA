@@ -256,15 +256,83 @@ def _package_matches_mapping(pkg: PackageObservation, mapping: RepositoryMapping
     return bool(selectors)
 
 
-def _select_packages(
-    package_obs: list[PackageObservation],
+def _same_observation_interval(
+    first: RepositoryObservation | PackageObservation,
+    second: RepositoryObservation | PackageObservation,
+    tolerance_days: int,
+) -> bool:
+    tolerance = timedelta(days=tolerance_days)
+    return (
+        abs(first.observation_window_start - second.observation_window_start) <= tolerance
+        and abs(first.observation_window_end - second.observation_window_end) <= tolerance
+    )
+
+
+def _resolve_linked_package_repository(
+    pkg: PackageObservation,
+    package_mapping: RepositoryMapping,
+    repo_observations: list[RepositoryObservation],
     mappings: list[RepositoryMapping],
-    selected_repo_ids: set[tuple[str, str]],
-    selected_repo_names: set[tuple[str, str, str]],
-    selected_repo_by_id: dict[tuple[str, str], tuple[str, str, str, str]],
-    selected_repo_by_name: dict[tuple[str, str, str], tuple[str, str, str, str]],
     ticker: str,
     as_of: datetime,
+    config: DeveloperEcosystemConfig,
+) -> str | None:
+    if not (pkg.repository_id or (pkg.repository_owner and pkg.repository_name)):
+        return None
+    repository_provider = package_mapping.provider
+    interval_candidates = [
+        repo
+        for repo in repo_observations
+        if repo.company_ticker == ticker
+        and repo.provider == repository_provider
+        and _interval_available_by_as_of(repo, as_of)
+        and _same_observation_interval(repo, pkg, config.observation_window_tolerance_days)
+    ]
+    id_candidates = {repo.repository_id for repo in interval_candidates}
+    name_candidates = {
+        (repo.owner.lower(), repo.name.lower(), repo.repository_id) for repo in interval_candidates
+    }
+    if pkg.repository_id:
+        interval_candidates = [
+            repo for repo in interval_candidates if repo.repository_id == pkg.repository_id
+        ]
+    if pkg.repository_owner and pkg.repository_name:
+        wanted_name = (pkg.repository_owner.lower(), pkg.repository_name.lower())
+        interval_candidates = [
+            repo
+            for repo in interval_candidates
+            if (repo.owner.lower(), repo.name.lower()) == wanted_name
+        ]
+        if (
+            pkg.repository_id
+            and pkg.repository_id in id_candidates
+            and any((owner, name) == wanted_name for owner, name, _ in name_candidates)
+            and not interval_candidates
+        ):
+            return (
+                "linked package evidence rejected due to contradictory repository identity: "
+                f"{pkg.package_name}"
+            )
+    for repo in interval_candidates:
+        mapping, reason = _resolve_repository_mapping(repo, mappings, ticker, as_of)
+        if mapping is None or reason == "excluded":
+            continue
+        if _status_exclusion(repo, mapping):
+            continue
+        return None
+    return (
+        "linked package evidence rejected due to excluded or unmapped repository for package "
+        f"interval: {pkg.package_name}"
+    )
+
+
+def _select_packages(
+    package_obs: list[PackageObservation],
+    repo_observations: list[RepositoryObservation],
+    mappings: list[RepositoryMapping],
+    ticker: str,
+    as_of: datetime,
+    config: DeveloperEcosystemConfig,
 ) -> tuple[list[SelectedPackageObservation], list[str]]:
     diagnostics: list[str] = []
     active_mappings = [
@@ -292,54 +360,11 @@ def _select_packages(
         identities = {_mapping_identity(m) for m in matches}
         if len(identities) > 1:
             raise ValueError(f"ambiguous package mapping for {pkg.ecosystem}:{pkg.package_name}")
-        mapping_has_repo_selector = any(
-            (
-                matches[0].repository_id,
-                matches[0].owner and matches[0].name,
-                matches[0].organization,
-            )
+        linkage_diagnostic = _resolve_linked_package_repository(
+            pkg, matches[0], repo_observations, mappings, ticker, as_of, config
         )
-        repository_provider = matches[0].provider
-        has_pkg_repo_identity = bool(
-            pkg.repository_id or (pkg.repository_owner and pkg.repository_name)
-        )
-        linked_by_id = (
-            selected_repo_by_id.get((repository_provider, pkg.repository_id))
-            if pkg.repository_id
-            else None
-        )
-        linked_by_name = (
-            selected_repo_by_name.get(
-                (
-                    repository_provider,
-                    (pkg.repository_owner or "").lower(),
-                    (pkg.repository_name or "").lower(),
-                )
-            )
-            if pkg.repository_owner and pkg.repository_name
-            else None
-        )
-        if linked_by_id and linked_by_name and linked_by_id != linked_by_name:
-            diagnostics.append(
-                f"linked package evidence rejected due to contradictory repository identity: {pkg.package_name}"
-            )
-            continue
-        if has_pkg_repo_identity and (
-            (pkg.repository_id and linked_by_id is None)
-            or (pkg.repository_owner and pkg.repository_name and linked_by_name is None)
-        ):
-            diagnostics.append(
-                f"linked package evidence rejected due to excluded or unmapped repository: {pkg.package_name}"
-            )
-            continue
-        if (
-            pkg.repository_id
-            and mapping_has_repo_selector
-            and (repository_provider, pkg.repository_id) not in selected_repo_ids
-        ):
-            diagnostics.append(
-                f"package linked to excluded or wrong repository: {pkg.package_name}"
-            )
+        if linkage_diagnostic is not None:
+            diagnostics.append(linkage_diagnostic)
             continue
         selected.append(SelectedPackageObservation(pkg, matches[0]))
     return selected, diagnostics
@@ -576,44 +601,13 @@ def calculate_developer_ecosystem_features(
     as_of = normalize_utc(as_of)
     ticker = ticker.upper().strip()
     selected, diagnostics = _select_repositories(repo_observations, mappings, ticker, as_of, config)
-    selected_repo_ids = {
-        (item.observation.provider, item.observation.repository_id) for item in selected
-    }
-    selected_repo_names = {
-        (item.observation.provider, item.observation.owner.lower(), item.observation.name.lower())
-        for item in selected
-    }
-    selected_repo_by_id = {
-        (item.observation.provider, item.observation.repository_id): (
-            item.observation.provider,
-            item.observation.repository_id,
-            item.observation.owner.lower(),
-            item.observation.name.lower(),
-        )
-        for item in selected
-    }
-    selected_repo_by_name = {
-        (
-            item.observation.provider,
-            item.observation.owner.lower(),
-            item.observation.name.lower(),
-        ): (
-            item.observation.provider,
-            item.observation.repository_id,
-            item.observation.owner.lower(),
-            item.observation.name.lower(),
-        )
-        for item in selected
-    }
     packages, package_diags = _select_packages(
         package_observations or [],
+        repo_observations,
         mappings,
-        selected_repo_ids,
-        selected_repo_names,
-        selected_repo_by_id,
-        selected_repo_by_name,
         ticker,
         as_of,
+        config,
     )
     diagnostics.extend(package_diags)
     features: dict[str, float | int | str | bool | None] = {}
