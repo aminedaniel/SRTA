@@ -268,6 +268,31 @@ def _same_observation_interval(
     )
 
 
+def _canonical_repository_revisions_for_interval(
+    candidates: list[RepositoryObservation],
+) -> list[RepositoryObservation]:
+    grouped: dict[tuple[str, str, datetime, datetime], list[RepositoryObservation]] = defaultdict(
+        list
+    )
+    for repo in candidates:
+        grouped[
+            (
+                repo.provider,
+                repo.repository_id,
+                repo.observation_window_start,
+                repo.observation_window_end,
+            )
+        ].append(repo)
+    return [
+        sorted(
+            revisions,
+            key=lambda repo: (repo.available_at, repo.provider_record_id),
+            reverse=True,
+        )[0]
+        for revisions in grouped.values()
+    ]
+
+
 def _resolve_linked_package_repository(
     pkg: PackageObservation,
     package_mapping: RepositoryMapping,
@@ -280,7 +305,7 @@ def _resolve_linked_package_repository(
     if not (pkg.repository_id or (pkg.repository_owner and pkg.repository_name)):
         return None
     repository_provider = package_mapping.provider
-    interval_candidates = [
+    raw_interval_candidates = [
         repo
         for repo in repo_observations
         if repo.company_ticker == ticker
@@ -288,6 +313,7 @@ def _resolve_linked_package_repository(
         and _interval_available_by_as_of(repo, as_of)
         and _same_observation_interval(repo, pkg, config.observation_window_tolerance_days)
     ]
+    interval_candidates = _canonical_repository_revisions_for_interval(raw_interval_candidates)
     id_candidates = {repo.repository_id for repo in interval_candidates}
     name_candidates = {
         (repo.owner.lower(), repo.name.lower(), repo.repository_id) for repo in interval_candidates

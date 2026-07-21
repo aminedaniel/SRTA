@@ -1149,3 +1149,75 @@ def test_interval_specific_package_repository_authorization_transitions() -> Non
         [], [package_map], "ACME", AS_OF, [independent]
     )
     assert independent_result.features["developer_package_downloads_90d"] == pytest.approx(1350)
+
+
+def test_linked_package_authorization_uses_canonical_repository_revision() -> None:
+    from smct_research.developer_ecosystem.models import PackageSelector
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    active = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
+    pkg = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")[1]
+    base = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    repo_map = base.model_copy(
+        update={"organization": None, "repository_id": "r2", "package_selectors": ()}
+    )
+    package_map = base.model_copy(
+        update={
+            "organization": None,
+            "package_selectors": (
+                PackageSelector.model_validate({"ecosystem": "pypi", "package_name": "acme-sdk"}),
+            ),
+        }
+    )
+
+    def evaluate_pair(original, correction):
+        return calculate_developer_ecosystem_features(
+            [original, correction], [repo_map, package_map], "ACME", AS_OF, [pkg]
+        )
+
+    for status_update in ({"is_archived": True}, {"is_mirror": True}, {"is_fork": True}):
+        correction = active.model_copy(
+            update={
+                **status_update,
+                "provider_record_id": f"z-correction-{next(iter(status_update))}",
+                "available_at": AS_OF,
+            }
+        )
+        first = evaluate_pair(active, correction)
+        second = evaluate_pair(correction, active)
+        assert first.model_dump(mode="json") == second.model_dump(mode="json")
+        assert "linked package evidence rejected" in " ".join(first.diagnostics)
+        assert first.features["developer_package_downloads_90d"] is None
+        assert first.features["developer_package_download_growth_90d"] is None
+        assert not any("pkg-current" in key for key in first.provenance)
+        assert not any("pkg-current" in key for key in first.source_as_of)
+        assert first.metadata["matched_package_count"] == 0
+        assert first.metadata["package_observations"] == 0
+
+    archived_original = active.model_copy(
+        update={"is_archived": True, "provider_record_id": "a-archived-original"}
+    )
+    active_correction = active.model_copy(
+        update={"provider_record_id": "z-active-correction", "available_at": AS_OF}
+    )
+    corrected_active = evaluate_pair(archived_original, active_correction)
+    assert corrected_active.features["developer_package_downloads_90d"] == pytest.approx(1350)
+    assert any("pkg-current" in key for key in corrected_active.provenance)
+
+    future_archived = active.model_copy(
+        update={
+            "is_archived": True,
+            "provider_record_id": "future-archived-correction",
+            "available_at": AS_OF + timedelta(days=1),
+        }
+    )
+    future_ignored = evaluate_pair(active, future_archived)
+    assert future_ignored.features["developer_package_downloads_90d"] == pytest.approx(1350)
+
+    tie_active = active.model_copy(update={"provider_record_id": "a-active", "available_at": AS_OF})
+    tie_archived = active.model_copy(
+        update={"is_archived": True, "provider_record_id": "z-archived", "available_at": AS_OF}
+    )
+    tie_result = evaluate_pair(tie_active, tie_archived)
+    assert "linked package evidence rejected" in " ".join(tie_result.diagnostics)
+    assert tie_result.features["developer_package_downloads_90d"] is None

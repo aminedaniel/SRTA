@@ -118,7 +118,7 @@ Retained configuration fields are production-wired: lookback windows and toleran
 
 ## Repository-linked package evidence
 
-If a package observation declares `repository_id` or repository owner/name, that linked repository must resolve to an eligible, non-excluded repository observation covering the same interval as the package observation. Mapping knowledge time, full-interval effective-date coverage, mapping precedence, explicit exclusions, archived repositories, mirrors, and forks without an active `RepositoryMapping.include_forks` override all apply to that package interval. Truly repository-independent package mappings remain valid only when the package observation declares no repository association.
+If a package observation declares `repository_id` or repository owner/name, that linked repository must resolve to an eligible, non-excluded repository observation covering the same interval as the package observation. For each provider/repository/interval series, authorization first chooses the latest point-in-time-eligible repository revision by `available_at` and `provider_record_id`; older active revisions cannot override a later archived, mirrored, excluded, or fork-disallowed correction. Mapping knowledge time, full-interval effective-date coverage, mapping precedence, explicit exclusions, archived repositories, mirrors, and forks without an active `RepositoryMapping.include_forks` override all apply to that package interval. Truly repository-independent package mappings remain valid only when the package observation declares no repository association.
 
 ## Observation interval availability
 
