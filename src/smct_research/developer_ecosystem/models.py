@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -150,6 +151,8 @@ class RepositoryObservation(BaseModel, frozen=True):
         object.__setattr__(self, "name", self.name.strip())
         if self.observation_window_end <= self.observation_window_start:
             raise ValueError("observation window end must be after start")
+        if self.available_at < self.observation_window_end:
+            raise ValueError("available_at cannot be before observation_window_end")
         if (
             self.new_contributor_count + self.returning_contributor_count
             > self.active_contributor_count
@@ -191,7 +194,27 @@ class PackageObservation(BaseModel, frozen=True):
             object.__setattr__(self, "latest_release_at", normalize_utc(self.latest_release_at))
         if self.observation_window_end <= self.observation_window_start:
             raise ValueError("observation window end must be after start")
-        object.__setattr__(self, "provider", self.provider.strip().lower())
+        if self.available_at < self.observation_window_end:
+            raise ValueError("available_at cannot be before observation_window_end")
+        provider = self.provider.strip().lower()
+        if not provider:
+            raise ValueError("package observation provider cannot be empty")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "package_name", self.package_name.strip().lower())
+        if self.repository_id is not None:
+            repository_id = self.repository_id.strip()
+            if not repository_id:
+                raise ValueError("package observation repository_id cannot be empty")
+            object.__setattr__(self, "repository_id", repository_id)
+        if (self.repository_owner is None) != (self.repository_name is None):
+            raise ValueError("package observation repository owner/name must be provided together")
+        if self.repository_owner is not None and self.repository_name is not None:
+            owner = self.repository_owner.strip()
+            name = self.repository_name.strip()
+            if not owner or not name:
+                raise ValueError("package observation repository owner/name cannot be empty")
+            object.__setattr__(self, "repository_owner", owner)
+            object.__setattr__(self, "repository_name", name)
         return self
 
 
@@ -286,6 +309,24 @@ class RepositoryMapping(BaseModel, frozen=True):
         if self.organization and obs.owner.lower() != self.organization.lower():
             return False
         return True
+
+
+def canonical_mapping_identity(mapping: RepositoryMapping) -> str:
+    payload = mapping.model_dump(mode="json")
+    selectors = payload.get("package_selectors") or []
+    payload["package_selectors"] = sorted(
+        selectors,
+        key=lambda item: (
+            item.get("ecosystem") or "",
+            item.get("package_name") or "",
+            item.get("provider") or "",
+            item.get("repository_id") or "",
+            item.get("repository_owner") or "",
+            item.get("repository_name") or "",
+        ),
+    )
+    payload["package_names"] = sorted(payload.get("package_names") or [])
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 class DeveloperDataQuality(BaseModel, frozen=True):

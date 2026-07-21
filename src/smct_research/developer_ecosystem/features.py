@@ -18,6 +18,7 @@ from smct_research.developer_ecosystem.models import (
     PackageObservation,
     RepositoryMapping,
     RepositoryObservation,
+    canonical_mapping_identity,
 )
 
 
@@ -77,6 +78,12 @@ def _in_bounds(
     )
 
 
+def _interval_available_by_as_of(
+    obs: RepositoryObservation | PackageObservation, as_of: datetime
+) -> bool:
+    return obs.observation_window_end <= as_of and obs.available_at <= as_of
+
+
 def _mapping_specificity(mapping: RepositoryMapping) -> int:
     if mapping.repository_id:
         return 3
@@ -88,8 +95,7 @@ def _mapping_specificity(mapping: RepositoryMapping) -> int:
 
 
 def _mapping_identity(mapping: RepositoryMapping) -> str:
-    payload = mapping.model_dump(mode="json")
-    return json.dumps(payload, sort_keys=True)
+    return canonical_mapping_identity(mapping)
 
 
 def _mapping_key(mapping: RepositoryMapping) -> str:
@@ -156,6 +162,9 @@ def _select_repositories(
     diagnostics: list[str] = []
     selected: list[SelectedRepositoryObservation] = []
     for obs in repo_obs:
+        if obs.observation_window_end > as_of:
+            diagnostics.append(f"future-ending observation excluded: {obs.repo_key}")
+            continue
         if obs.available_at > as_of:
             diagnostics.append(f"future observation excluded: {obs.repo_key}")
             continue
@@ -190,7 +199,7 @@ def _canonical_repo_window(
     grouped: dict[tuple[str, str, int], list[SelectedRepositoryObservation]] = defaultdict(list)
     for item in selected:
         obs = item.observation
-        if obs.available_at > as_of:
+        if not _interval_available_by_as_of(obs, as_of):
             continue
         if not _matches_duration(obs, days, config.observation_window_tolerance_days):
             continue
@@ -250,6 +259,7 @@ def _select_packages(
     package_obs: list[PackageObservation],
     mappings: list[RepositoryMapping],
     selected_repo_ids: set[str],
+    selected_repo_names: set[tuple[str, str, str]],
     ticker: str,
     as_of: datetime,
 ) -> tuple[list[SelectedPackageObservation], list[str]]:
@@ -259,6 +269,9 @@ def _select_packages(
     ]
     selected: list[SelectedPackageObservation] = []
     for pkg in package_obs:
+        if pkg.observation_window_end > as_of:
+            diagnostics.append(f"future-ending package observation excluded: {pkg.package_name}")
+            continue
         if pkg.available_at > as_of:
             diagnostics.append(f"future package observation excluded: {pkg.package_name}")
             continue
@@ -283,6 +296,25 @@ def _select_packages(
                 matches[0].organization,
             )
         )
+        has_pkg_repo_identity = bool(
+            pkg.repository_id or (pkg.repository_owner and pkg.repository_name)
+        )
+        repo_id_allowed = pkg.repository_id in selected_repo_ids if pkg.repository_id else True
+        repo_name_allowed = (
+            (
+                matches[0].provider,
+                (pkg.repository_owner or "").lower(),
+                (pkg.repository_name or "").lower(),
+            )
+            in selected_repo_names
+            if pkg.repository_owner and pkg.repository_name
+            else True
+        )
+        if has_pkg_repo_identity and (not repo_id_allowed or not repo_name_allowed):
+            diagnostics.append(
+                f"linked package evidence rejected due to excluded or unmapped repository: {pkg.package_name}"
+            )
+            continue
         if (
             pkg.repository_id
             and mapping_has_repo_selector
@@ -309,6 +341,8 @@ def _canonical_package_window(
     )
     for item in selected:
         obs = item.observation
+        if not _interval_available_by_as_of(obs, as_of):
+            continue
         if not _matches_duration(obs, days, config.observation_window_tolerance_days):
             continue
         if not _in_bounds(obs, start, end, config.observation_window_tolerance_days):
@@ -535,8 +569,17 @@ def calculate_developer_ecosystem_features(
     ticker = ticker.upper().strip()
     selected, diagnostics = _select_repositories(repo_observations, mappings, ticker, as_of, config)
     selected_repo_ids = {item.observation.repository_id for item in selected}
+    selected_repo_names = {
+        (item.observation.provider, item.observation.owner.lower(), item.observation.name.lower())
+        for item in selected
+    }
     packages, package_diags = _select_packages(
-        package_observations or [], mappings, selected_repo_ids, ticker, as_of
+        package_observations or [],
+        mappings,
+        selected_repo_ids,
+        selected_repo_names,
+        ticker,
+        as_of,
     )
     diagnostics.extend(package_diags)
     features: dict[str, float | int | str | bool | None] = {}
@@ -544,6 +587,10 @@ def calculate_developer_ecosystem_features(
     source_as_of: dict[str, datetime] = {}
     current90: list[SelectedRepositoryObservation] = []
     current90_packages: list[SelectedPackageObservation] = []
+    matched_current_90: list[SelectedRepositoryObservation] = []
+    matched_prior_90: list[SelectedRepositoryObservation] = []
+    matched_package_current_90: list[SelectedPackageObservation] = []
+    matched_package_prior_90: list[SelectedPackageObservation] = []
     used_repo: list[SelectedRepositoryObservation] = []
     used_pkg: list[SelectedPackageObservation] = []
     for days in window_values:
@@ -560,6 +607,10 @@ def calculate_developer_ecosystem_features(
         if days == 90:
             current90 = cur
             current90_packages = pkg_cur
+            matched_current_90 = matched_cur
+            matched_prior_90 = matched_prior
+            matched_package_current_90 = matched_pkg_cur
+            matched_package_prior_90 = matched_pkg_prior
         if cur:
             used_repo.extend(cur + matched_prior)
             active = _weighted_sum(cur, "active_contributor_count")
@@ -736,6 +787,8 @@ def calculate_developer_ecosystem_features(
     for value, weight in (
         (contributor_growth, weights.contributor_growth * 100),
         (external_growth, weights.external_contributor_growth * 100),
+        (release_growth, weights.release_growth * 100),
+        (fork_growth, weights.fork_growth * 100),
         (package_growth, config.package_adoption_weights.download_growth * 100),
         (dependent_growth, config.package_adoption_weights.dependent_package_growth * 100),
     ):
@@ -816,11 +869,26 @@ def calculate_developer_ecosystem_features(
     ) + _canonical_repo_window(selected, as_of, primary_window, True, config)
     eligible_repo_ids = {item.observation.repository_id for item in eligible_primary}
     current_repo_ids = {item.observation.repository_id for item in current90}
-    matched_repo_ids = (
-        {item.observation.repository_id for item in matched_cur}
-        if "matched_cur" in locals()
-        else set()
-    )
+    matched_repo_ids = {item.observation.repository_id for item in matched_current_90}
+    matched_prior_repo_ids = {item.observation.repository_id for item in matched_prior_90}
+    matched_package_ids = {
+        (
+            item.observation.provider,
+            item.observation.ecosystem.value,
+            _normalize_package_name(item.observation),
+            item.observation.repository_id or "",
+        )
+        for item in matched_package_current_90
+    }
+    matched_prior_package_ids = {
+        (
+            item.observation.provider,
+            item.observation.ecosystem.value,
+            _normalize_package_name(item.observation),
+            item.observation.repository_id or "",
+        )
+        for item in matched_package_prior_90
+    }
     completeness = min(1.0, len(current_repo_ids) / max(1, len(eligible_repo_ids)))
     used_freshness_values = [
         (as_of - source_as_of[key]).days
@@ -906,6 +974,9 @@ def calculate_developer_ecosystem_features(
             "eligible_repository_count": len(eligible_repo_ids),
             "current_repository_count": len(current_repo_ids),
             "matched_repository_count": len(matched_repo_ids),
+            "matched_prior_repository_count": len(matched_prior_repo_ids),
+            "matched_package_count": len(matched_package_ids),
+            "matched_prior_package_count": len(matched_prior_package_ids),
             "repository_coverage_ratio": completeness,
             "package_observations": len(current90_packages),
             "observation_grain_tolerance_days": config.observation_window_tolerance_days,

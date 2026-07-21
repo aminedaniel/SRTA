@@ -39,7 +39,7 @@ def _features(packages: bool = True):
 
 def test_point_in_time_mapping_growth_bot_concentration_and_adoption() -> None:
     result = _features()
-    assert "future observation excluded" in " ".join(result.diagnostics)
+    assert "future-ending observation excluded" in " ".join(result.diagnostics)
     assert result.features["developer_active_contributor_growth_90d"] is not None
     assert result.features["developer_external_contributor_growth_90d"] is not None
     assert result.features["developer_package_download_growth_90d"] == pytest.approx(0.35)
@@ -297,7 +297,7 @@ def test_package_mapping_and_provider_scoped_provenance() -> None:
         update={"provider_record_id": "wrong-repo", "repository_id": "not-selected"}
     )
     wrong = calculate_developer_ecosystem_features(repos, maps, "ACME", AS_OF, [wrong_repo])
-    assert "package linked to excluded or wrong repository" in " ".join(wrong.diagnostics)
+    assert "linked package evidence rejected" in " ".join(wrong.diagnostics)
 
 
 def test_custom_config_bot_noise_and_star_spike(tmp_path: Path) -> None:
@@ -545,16 +545,25 @@ def test_package_only_mapping_and_provider_ambiguity(tmp_path: Path) -> None:
             ),
         }
     )
-    result = calculate_developer_ecosystem_features(repos, [package_only], "ACME", AS_OF, [pkg])
+    independent_pkg = pkg.model_copy(update={"repository_id": None})
+    result = calculate_developer_ecosystem_features(
+        repos, [package_only], "ACME", AS_OF, [independent_pkg]
+    )
     assert result.features["developer_active_contributors_90d"] is None
     assert result.metadata["eligible_repository_count"] == 0
     assert any(key.startswith("developer:package:pypi:pypi:acme-sdk") for key in result.provenance)
 
     other = PackageObservation.model_validate(
-        {**pkg.model_dump(mode="json"), "provider": "other", "provider_record_id": "other-pkg"}
+        {
+            **independent_pkg.model_dump(mode="json"),
+            "provider": "other",
+            "provider_record_id": "other-pkg",
+        }
     )
     with pytest.raises(ValueError, match="ambiguous multi-provider package"):
-        calculate_developer_ecosystem_features(repos, [package_only], "ACME", AS_OF, [pkg, other])
+        calculate_developer_ecosystem_features(
+            repos, [package_only], "ACME", AS_OF, [independent_pkg, other]
+        )
     provider_specific = package_only.model_copy(
         update={
             "package_selectors": (
@@ -565,7 +574,7 @@ def test_package_only_mapping_and_provider_ambiguity(tmp_path: Path) -> None:
         }
     )
     selected = calculate_developer_ecosystem_features(
-        repos, [provider_specific], "ACME", AS_OF, [pkg, other]
+        repos, [provider_specific], "ACME", AS_OF, [independent_pkg, other]
     )
     assert not any("other-pkg" in key for key in selected.provenance)
 
@@ -643,3 +652,236 @@ def test_nonfinite_config_and_signal_unavailable_without_directional_history(
     )
     assert features.features["developer_momentum_quality_score"] is None
     assert "insufficient matched directional history" in " ".join(features.diagnostics)
+
+
+def test_linked_package_evidence_respects_repository_exclusions() -> None:
+    from smct_research.developer_ecosystem.models import PackageSelector
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    current_repo = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
+    pkg = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")[1]
+    base_map = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    package_only = base_map.model_copy(
+        update={
+            "organization": None,
+            "package_selectors": (
+                PackageSelector.model_validate(
+                    {"ecosystem": "pypi", "package_name": "acme-sdk", "repository_id": "r2"}
+                ),
+            ),
+        }
+    )
+    excluded_repo_mapping = base_map.model_copy(
+        update={"organization": None, "repository_id": "r2", "include": False}
+    )
+    result = calculate_developer_ecosystem_features(
+        [current_repo], [package_only, excluded_repo_mapping], "ACME", AS_OF, [pkg]
+    )
+    assert "linked package evidence rejected" in " ".join(result.diagnostics)
+    assert not any("pkg-current" in key for key in result.provenance)
+
+    linked_by_name = pkg.model_copy(
+        update={"repository_id": None, "repository_owner": "acme", "repository_name": "sdk"}
+    )
+    name_result = calculate_developer_ecosystem_features(
+        [current_repo.model_copy(update={"is_archived": True})],
+        [
+            package_only.model_copy(
+                update={
+                    "package_selectors": (
+                        PackageSelector.model_validate(
+                            {
+                                "ecosystem": "pypi",
+                                "package_name": "acme-sdk",
+                                "repository_owner": "acme",
+                                "repository_name": "sdk",
+                            }
+                        ),
+                    )
+                }
+            )
+        ],
+        "ACME",
+        AS_OF,
+        [linked_by_name],
+    )
+    assert "linked package evidence rejected" in " ".join(name_result.diagnostics)
+
+    repo_status_map = base_map.model_copy(
+        update={"organization": None, "repository_id": "r2", "package_selectors": ()}
+    )
+    for field in ("is_archived", "is_mirror", "is_fork"):
+        repo = current_repo.model_copy(update={field: True})
+        out = calculate_developer_ecosystem_features(
+            [repo], [repo_status_map, package_only], "ACME", AS_OF, [pkg]
+        )
+        assert "linked package evidence rejected" in " ".join(out.diagnostics)
+
+    independent = pkg.model_copy(update={"repository_id": None})
+    independent_selector = package_only.model_copy(
+        update={
+            "package_selectors": (
+                PackageSelector.model_validate({"ecosystem": "pypi", "package_name": "acme-sdk"}),
+            )
+        }
+    )
+    valid = calculate_developer_ecosystem_features(
+        [], [independent_selector], "ACME", AS_OF, [independent]
+    )
+    assert any("pkg-current" in key for key in valid.provenance)
+
+
+def test_directional_release_and_fork_growth_are_scored_and_window_order_stable() -> None:
+    from smct_research.developer_ecosystem.config import DeveloperEcosystemConfig
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    current = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    prior = next(item for item in repos if item.provider_record_id == "acme-core-prior")
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+
+    release_positive_current = current.model_copy(
+        update={
+            "active_contributor_count": prior.active_contributor_count,
+            "external_contributor_count": prior.external_contributor_count,
+            "issues": prior.issues,
+            "popularity": prior.popularity,
+            "releases": current.releases.model_copy(update={"release_count": 6}),
+        }
+    )
+    positive = calculate_developer_ecosystem_features(
+        [release_positive_current, prior], maps, "ACME", AS_OF, []
+    )
+    assert positive.features["developer_release_growth_90d"] > 0
+    assert positive.features["developer_momentum_quality_score"] > 0
+
+    release_negative_current = release_positive_current.model_copy(
+        update={"releases": current.releases.model_copy(update={"release_count": 0})}
+    )
+    negative = calculate_developer_ecosystem_features(
+        [release_negative_current, prior], maps, "ACME", AS_OF, []
+    )
+    assert negative.features["developer_release_growth_90d"] < 0
+    assert negative.features["developer_momentum_quality_score"] < 0
+
+    fork_current = release_positive_current.model_copy(
+        update={
+            "releases": prior.releases,
+            "popularity": prior.popularity.model_copy(update={"fork_count": 99}),
+        }
+    )
+    forked = calculate_developer_ecosystem_features([fork_current, prior], maps, "ACME", AS_OF, [])
+    assert forked.features["developer_fork_growth_90d"] > 0
+    assert forked.features["developer_momentum_quality_score"] > 0
+
+    metadata_keys = (
+        "matched_repository_count",
+        "matched_package_count",
+        "repository_coverage_ratio",
+    )
+    baseline = calculate_developer_ecosystem_features([current, prior], maps, "ACME", AS_OF, [])
+    reordered_cfg = DeveloperEcosystemConfig.model_validate(
+        {
+            "lookback_windows_days": [180, 30, 90],
+            "minimum_history_requirements": {"preferred_windows_days": 90},
+        }
+    )
+    reordered = calculate_developer_ecosystem_features(
+        [current, prior], maps, "ACME", AS_OF, [], config=reordered_cfg
+    )
+    only90 = calculate_developer_ecosystem_features(
+        [current, prior], maps, "ACME", AS_OF, [], windows=(90,)
+    )
+    assert {key: baseline.metadata[key] for key in metadata_keys} == {
+        key: reordered.metadata[key] for key in metadata_keys
+    }
+    assert {key: baseline.metadata[key] for key in metadata_keys} == {
+        key: only90.metadata[key] for key in metadata_keys
+    }
+
+
+def test_interval_contract_config_validation_and_canonical_mapping_identity(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    from smct_research.developer_ecosystem.config import DeveloperEcosystemConfig
+    from smct_research.developer_ecosystem.models import (
+        PackageSelector,
+        RepositoryObservation,
+        canonical_mapping_identity,
+    )
+    from smct_research.developer_ecosystem.providers import (
+        load_repository_mappings as provider_load,
+    )
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    current = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    with pytest.raises(ValueError, match="available_at cannot be before"):
+        RepositoryObservation.model_validate(
+            {
+                **current.model_dump(mode="json"),
+                "provider_record_id": "bad-available",
+                "available_at": "2026-07-15T00:00:00Z",
+            }
+        )
+    future = current.model_copy(
+        update={
+            "provider_record_id": "future-ending",
+            "observation_window_start": AS_OF.replace(month=4, day=19),
+            "observation_window_end": AS_OF.replace(day=18),
+            "available_at": AS_OF.replace(day=18),
+        }
+    )
+    maps = load_repository_mappings(EX / "mappings.json", "ACME")
+    out = calculate_developer_ecosystem_features([future], maps, "ACME", AS_OF, [])
+    assert "future-ending observation excluded" in " ".join(out.diagnostics)
+
+    exactly = current.model_copy(update={"observation_window_end": AS_OF, "available_at": AS_OF})
+    exact_out = calculate_developer_ecosystem_features([exactly], maps, "ACME", AS_OF, [])
+    assert exact_out.features["developer_active_contributors_90d"] is not None
+
+    with pytest.raises(ValueError, match="meaningful_activity_events_90d"):
+        DeveloperEcosystemConfig.model_validate(
+            {"activity_thresholds": {"meaningful_activity_events_90d": -1}}
+        )
+    with pytest.raises(ValueError, match="top_one_warning_share"):
+        DeveloperEcosystemConfig.model_validate(
+            {
+                "contributor_concentration_penalties": {
+                    "top_one_warning_share": 0.8,
+                    "top_one_high_risk_share": 0.4,
+                }
+            }
+        )
+
+    selector_a = PackageSelector.model_validate({"ecosystem": "pypi", "package_name": "a"})
+    selector_b = PackageSelector.model_validate({"ecosystem": "npm", "package_name": "b"})
+    mapping = maps[0].model_copy(update={"package_selectors": (selector_a, selector_b)})
+    reversed_mapping = maps[0].model_copy(update={"package_selectors": (selector_b, selector_a)})
+    assert canonical_mapping_identity(mapping) == canonical_mapping_identity(reversed_mapping)
+    different = maps[0].model_copy(update={"package_selectors": (selector_a,)})
+    assert canonical_mapping_identity(mapping) != canonical_mapping_identity(different)
+
+    mapping_file = tmp_path / "maps.json"
+    mapping_file.write_text(
+        json.dumps([mapping.model_dump(mode="json"), reversed_mapping.model_dump(mode="json")])
+    )
+    assert len(provider_load(mapping_file, "ACME")) == 1
+    store = LocalAnalyticalStore(tmp_path / "canon.duckdb")
+    store.store_repository_mappings([mapping, reversed_mapping])
+    stored_mapping = store.load_repository_mappings()[0]
+    assert canonical_mapping_identity(stored_mapping) == canonical_mapping_identity(mapping)
+    store.close()
+
+    script = (
+        "from smct_research.developer_ecosystem.models import PackageSelector,RepositoryMapping,canonical_mapping_identity;"
+        f"import json; data={json.dumps(mapping.model_dump(mode='json'))!r};"
+        "print(canonical_mapping_identity(RepositoryMapping.model_validate(json.loads(data))))"
+    )
+    first = subprocess.check_output(
+        [sys.executable, "-c", script], text=True, env={"PYTHONPATH": "src"}
+    )
+    second = subprocess.check_output(
+        [sys.executable, "-c", script], text=True, env={"PYTHONPATH": "src"}
+    )
+    assert first == second

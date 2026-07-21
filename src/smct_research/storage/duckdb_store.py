@@ -18,6 +18,7 @@ from smct_research.developer_ecosystem.models import (
     PackageObservation,
     RepositoryMapping,
     RepositoryObservation,
+    canonical_mapping_identity,
 )
 from smct_research.estimates.models import ConsensusEstimate
 from smct_research.financials.models import FeatureValue, FinancialObservation
@@ -309,9 +310,9 @@ def store_repository_mappings(
     self: LocalAnalyticalStore, mappings: Iterable[RepositoryMapping]
 ) -> None:
     for item in mappings:
-        payload = item.model_dump_json()
-        provider_record_id = _json_identity(item)
-        logical = json.dumps(item.model_dump(mode="json"), sort_keys=True)
+        payload = canonical_mapping_identity(item)
+        provider_record_id = hashlib.sha256(payload.encode()).hexdigest()
+        logical = payload
         _store_immutable_json(
             self,
             "developer_repository_mappings",

@@ -109,11 +109,24 @@ Mappings must be known by the evaluation timestamp and must cover the entire obs
 
 ## Package identity policy
 
-Package selectors distinguish ecosystem, normalized package name, optional provider, and optional repository identity. Thus `pypi:example` and `npm:example` are separate. Legacy `package_names` are still accepted for bundled examples, but typed package selectors are preferred when multiple ecosystems or providers can share names.
+Package evidence uses typed `package_selectors` that distinguish ecosystem, normalized package name, optional provider, and optional repository identity. Thus `pypi:example` and `npm:example` are separate. Legacy ecosystem-agnostic `package_names` is rejected during model validation because plain names can conflate ecosystems.
 
 ## Configuration-field usage
 
-Retained configuration fields are production-wired: lookback windows and tolerance control grain selection; bot allow/deny/patterns drive bot classification; role weights affect repository weighting; meaningful-activity threshold affects breadth; fresh/stale days affect freshness confidence; concentration warning/high-risk thresholds affect penalties/diagnostics; star-spike thresholds affect manipulation diagnostics; package download/dependent weights affect quality score; minimum mapped repositories and preferred history reduce confidence or availability; B1 scoring weights affect contributor, external, maintenance, breadth, and bot score components. The composite B1 weight remains centralized in the composite scorer rather than duplicated in feature configuration.
+Retained configuration fields are production-wired: lookback windows and tolerance control grain selection; bot allow/deny/patterns drive bot classification; role weights affect repository weighting; meaningful-activity threshold affects breadth; fresh/stale days affect freshness confidence; concentration warning/high-risk thresholds affect penalties/diagnostics; star-spike thresholds affect manipulation diagnostics; package download/dependent weights affect quality score; minimum mapped repositories and preferred history reduce confidence or availability; B1 scoring weights affect contributor, external, release, fork, maintenance, breadth, and bot score components. The composite B1 weight remains centralized in the composite scorer rather than duplicated in feature configuration.
+
+
+## Repository-linked package evidence
+
+If a package observation declares `repository_id` or repository owner/name, that linked repository must resolve to an eligible, non-excluded repository in the supplied evidence universe. Explicit exclusions, archived repositories, mirrors, and forks without an active `RepositoryMapping.include_forks` override reject linked package evidence. Truly repository-independent package mappings remain valid only when the package observation declares no repository association.
+
+## Observation interval availability
+
+Repository and package observations must satisfy `observation_window_end <= available_at <= evaluation_as_of`, and selected current/prior windows must not end after the evaluation timestamp. Boundary tolerance handles inclusive windows and timestamp rounding only; it never authorizes future activity.
+
+## Fork inclusion
+
+Fork inclusion is controlled by `RepositoryMapping.include_forks`; provider observations cannot self-authorize fork inclusion.
 
 ## Provider revisions
 

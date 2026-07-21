@@ -49,6 +49,8 @@ class MinimumHistoryConfig(BaseModel):
 class B1ScoringWeightsConfig(BaseModel):
     contributor_growth: float = 0.28
     external_contributor_growth: float = 0.18
+    release_growth: float = 0.12
+    fork_growth: float = 0.07
     maintenance_backlog_penalty: float = 0.18
     breadth_bonus_cap: float = 0.10
     bot_penalty: float = 0.15
@@ -105,12 +107,19 @@ class DeveloperEcosystemConfig(BaseModel):
             raise ValueError("minimum_mapped_repositories must be at least one")
         if self.minimum_history_requirements.preferred_windows_days <= 0:
             raise ValueError("preferred_windows_days must be positive")
+        if self.activity_thresholds.meaningful_activity_events_90d < 0:
+            raise ValueError("meaningful_activity_events_90d must be nonnegative")
         shares = [
             self.contributor_concentration_penalties.top_one_warning_share,
             self.contributor_concentration_penalties.top_one_high_risk_share,
         ]
         if any(not math.isfinite(value) or value < 0 or value > 1 for value in shares):
             raise ValueError("concentration shares must be finite values between 0 and 1")
+        if (
+            self.contributor_concentration_penalties.top_one_warning_share
+            > self.contributor_concentration_penalties.top_one_high_risk_share
+        ):
+            raise ValueError("top_one_warning_share cannot exceed top_one_high_risk_share")
         numeric_groups = [
             *self.repository_role_weights.values(),
             self.star_spike_diagnostics.spike_growth_threshold,
@@ -119,6 +128,8 @@ class DeveloperEcosystemConfig(BaseModel):
             self.package_adoption_weights.dependent_package_growth,
             self.b1_scoring_weights.contributor_growth,
             self.b1_scoring_weights.external_contributor_growth,
+            self.b1_scoring_weights.release_growth,
+            self.b1_scoring_weights.fork_growth,
             self.b1_scoring_weights.maintenance_backlog_penalty,
             self.b1_scoring_weights.breadth_bonus_cap,
             self.b1_scoring_weights.bot_penalty,

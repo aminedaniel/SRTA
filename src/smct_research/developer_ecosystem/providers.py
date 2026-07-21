@@ -11,6 +11,7 @@ from smct_research.developer_ecosystem.models import (
     PackageObservation,
     RepositoryMapping,
     RepositoryObservation,
+    canonical_mapping_identity,
 )
 from smct_research.providers.base import ProviderResponseError
 
@@ -62,6 +63,8 @@ T = TypeVar("T", RepositoryObservation, PackageObservation, RepositoryMapping)
 
 
 def _canonical_payload(item: T) -> str:
+    if isinstance(item, RepositoryMapping):
+        return canonical_mapping_identity(item)
     return json.dumps(item.model_dump(mode="json"), sort_keys=True)
 
 
