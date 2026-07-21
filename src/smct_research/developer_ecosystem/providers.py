@@ -12,6 +12,7 @@ from smct_research.developer_ecosystem.models import (
     RepositoryMapping,
     RepositoryObservation,
     canonical_mapping_identity,
+    canonical_package_series_identity,
 )
 from smct_research.providers.base import ProviderResponseError
 
@@ -89,16 +90,7 @@ def _logical_key(
             item.available_at.isoformat(),
         )
     if isinstance(item, PackageObservation):
-        return (
-            "pkg",
-            item.provider,
-            item.ecosystem.value,
-            item.package_name.strip().lower(),
-            item.repository_id or "",
-            item.observation_window_start.isoformat(),
-            item.observation_window_end.isoformat(),
-            item.available_at.isoformat(),
-        )
+        return ("pkg", *canonical_package_series_identity(item, include_interval=True))
     return ("map", _canonical_payload(item))
 
 

@@ -19,6 +19,7 @@ from smct_research.developer_ecosystem.models import (
     RepositoryMapping,
     RepositoryObservation,
     canonical_mapping_identity,
+    canonical_package_series_identity,
 )
 
 
@@ -127,16 +128,16 @@ def _resolve_repository_mapping(
     if not active:
         return None, "unmapped"
     max_spec = max(_mapping_specificity(m) for m in active)
-    strongest = [m for m in active if _mapping_specificity(m) == max_spec]
-    distinct = {_mapping_identity(m) for m in strongest}
+    strongest_by_identity = {
+        _mapping_identity(m): m for m in active if _mapping_specificity(m) == max_spec
+    }
+    strongest = list(strongest_by_identity.values())
     includes = [m for m in strongest if m.include]
     exclusions = [m for m in strongest if not m.include]
     if len(includes) > 1 or len(exclusions) > 1:
         raise ValueError(f"ambiguous repository mapping for {obs.repo_key}")
     if includes and exclusions:
         return exclusions[0], "excluded"
-    if len(distinct) > 1:
-        raise ValueError(f"ambiguous repository mapping for {obs.repo_key}")
     if exclusions:
         return exclusions[0], "excluded"
     return includes[0], None
@@ -258,8 +259,10 @@ def _package_matches_mapping(pkg: PackageObservation, mapping: RepositoryMapping
 def _select_packages(
     package_obs: list[PackageObservation],
     mappings: list[RepositoryMapping],
-    selected_repo_ids: set[str],
+    selected_repo_ids: set[tuple[str, str]],
     selected_repo_names: set[tuple[str, str, str]],
+    selected_repo_by_id: dict[tuple[str, str], tuple[str, str, str, str]],
+    selected_repo_by_name: dict[tuple[str, str, str], tuple[str, str, str, str]],
     ticker: str,
     as_of: datetime,
 ) -> tuple[list[SelectedPackageObservation], list[str]]:
@@ -296,21 +299,35 @@ def _select_packages(
                 matches[0].organization,
             )
         )
+        repository_provider = matches[0].provider
         has_pkg_repo_identity = bool(
             pkg.repository_id or (pkg.repository_owner and pkg.repository_name)
         )
-        repo_id_allowed = pkg.repository_id in selected_repo_ids if pkg.repository_id else True
-        repo_name_allowed = (
-            (
-                matches[0].provider,
-                (pkg.repository_owner or "").lower(),
-                (pkg.repository_name or "").lower(),
-            )
-            in selected_repo_names
-            if pkg.repository_owner and pkg.repository_name
-            else True
+        linked_by_id = (
+            selected_repo_by_id.get((repository_provider, pkg.repository_id))
+            if pkg.repository_id
+            else None
         )
-        if has_pkg_repo_identity and (not repo_id_allowed or not repo_name_allowed):
+        linked_by_name = (
+            selected_repo_by_name.get(
+                (
+                    repository_provider,
+                    (pkg.repository_owner or "").lower(),
+                    (pkg.repository_name or "").lower(),
+                )
+            )
+            if pkg.repository_owner and pkg.repository_name
+            else None
+        )
+        if linked_by_id and linked_by_name and linked_by_id != linked_by_name:
+            diagnostics.append(
+                f"linked package evidence rejected due to contradictory repository identity: {pkg.package_name}"
+            )
+            continue
+        if has_pkg_repo_identity and (
+            (pkg.repository_id and linked_by_id is None)
+            or (pkg.repository_owner and pkg.repository_name and linked_by_name is None)
+        ):
             diagnostics.append(
                 f"linked package evidence rejected due to excluded or unmapped repository: {pkg.package_name}"
             )
@@ -318,7 +335,7 @@ def _select_packages(
         if (
             pkg.repository_id
             and mapping_has_repo_selector
-            and pkg.repository_id not in selected_repo_ids
+            and (repository_provider, pkg.repository_id) not in selected_repo_ids
         ):
             diagnostics.append(
                 f"package linked to excluded or wrong repository: {pkg.package_name}"
@@ -336,9 +353,7 @@ def _canonical_package_window(
     config: DeveloperEcosystemConfig,
 ) -> list[SelectedPackageObservation]:
     start, end = _prior_bounds(as_of, days) if prior else _current_bounds(as_of, days)
-    grouped: dict[tuple[str, str, str, str, int], list[SelectedPackageObservation]] = defaultdict(
-        list
-    )
+    grouped: dict[tuple[str, ...], list[SelectedPackageObservation]] = defaultdict(list)
     for item in selected:
         obs = item.observation
         if not _interval_available_by_as_of(obs, as_of):
@@ -348,20 +363,14 @@ def _canonical_package_window(
         if not _in_bounds(obs, start, end, config.observation_window_tolerance_days):
             continue
         grouped[
-            (
-                obs.provider,
-                obs.ecosystem.value,
-                _normalize_package_name(obs),
-                obs.repository_id or "",
-                days,
-            )
+            canonical_package_series_identity(obs, item.mapping.provider, grain_days=days)
         ].append(item)
-    package_to_providers: dict[tuple[str, str, str, int], set[str]] = defaultdict(set)
-    for provider, ecosystem, package_name, repository_id, grain in grouped:
-        package_to_providers[(ecosystem, package_name, repository_id, grain)].add(provider)
+    package_to_providers: dict[tuple[str, ...], set[str]] = defaultdict(set)
+    for key in grouped:
+        package_to_providers[key[1:]].add(key[0])
     ambiguous = [key for key, providers in package_to_providers.items() if len(providers) > 1]
     if ambiguous:
-        label = ", ".join(f"{a[0]}:{a[1]}:{a[2]}:{a[3]}d" for a in sorted(ambiguous))
+        label = ", ".join(":".join(key) for key in sorted(ambiguous))
         raise ValueError(f"ambiguous multi-provider package series: {label}")
     return [
         sorted(
@@ -434,11 +443,14 @@ def _repo_provenance_key(obs: RepositoryObservation) -> str:
     return f"developer:repository:{obs.provider}:{obs.repository_id}:{obs.provider_record_id}"
 
 
-def _package_provenance_key(obs: PackageObservation) -> str:
-    return f"developer:package:{obs.provider}:{obs.ecosystem.value}:{obs.package_name}:{obs.provider_record_id}"
+def _package_provenance_key(obs: PackageObservation, repository_provider: str | None) -> str:
+    package_identity = ":".join(canonical_package_series_identity(obs, repository_provider))
+    return f"developer:package:{package_identity}:{obs.provider_record_id}"
 
 
-def _provenance_payload(obs: RepositoryObservation | PackageObservation) -> str:
+def _provenance_payload(
+    obs: RepositoryObservation | PackageObservation, repository_provider: str | None = None
+) -> str:
     if isinstance(obs, RepositoryObservation):
         return json.dumps(
             {
@@ -464,7 +476,10 @@ def _provenance_payload(obs: RepositoryObservation | PackageObservation) -> str:
             "observation_window_end": obs.observation_window_end.isoformat(),
             "ecosystem": obs.ecosystem.value,
             "package_name": obs.package_name,
+            "repository_provider": repository_provider,
             "repository_id": obs.repository_id,
+            "repository_owner": obs.repository_owner,
+            "repository_name": obs.repository_name,
         },
         sort_keys=True,
     )
@@ -481,16 +496,9 @@ def _repo_series_key(item: SelectedRepositoryObservation, days: int) -> tuple[st
     return obs.provider, obs.repository_id, days
 
 
-def _package_series_key(
-    item: SelectedPackageObservation, days: int
-) -> tuple[str, str, str, str, int]:
-    obs = item.observation
-    return (
-        obs.provider,
-        obs.ecosystem.value,
-        _normalize_package_name(obs),
-        obs.repository_id or "",
-        days,
+def _package_series_key(item: SelectedPackageObservation, days: int) -> tuple[str, ...]:
+    return canonical_package_series_identity(
+        item.observation, item.mapping.provider, grain_days=days
     )
 
 
@@ -568,9 +576,33 @@ def calculate_developer_ecosystem_features(
     as_of = normalize_utc(as_of)
     ticker = ticker.upper().strip()
     selected, diagnostics = _select_repositories(repo_observations, mappings, ticker, as_of, config)
-    selected_repo_ids = {item.observation.repository_id for item in selected}
+    selected_repo_ids = {
+        (item.observation.provider, item.observation.repository_id) for item in selected
+    }
     selected_repo_names = {
         (item.observation.provider, item.observation.owner.lower(), item.observation.name.lower())
+        for item in selected
+    }
+    selected_repo_by_id = {
+        (item.observation.provider, item.observation.repository_id): (
+            item.observation.provider,
+            item.observation.repository_id,
+            item.observation.owner.lower(),
+            item.observation.name.lower(),
+        )
+        for item in selected
+    }
+    selected_repo_by_name = {
+        (
+            item.observation.provider,
+            item.observation.owner.lower(),
+            item.observation.name.lower(),
+        ): (
+            item.observation.provider,
+            item.observation.repository_id,
+            item.observation.owner.lower(),
+            item.observation.name.lower(),
+        )
         for item in selected
     }
     packages, package_diags = _select_packages(
@@ -578,6 +610,8 @@ def calculate_developer_ecosystem_features(
         mappings,
         selected_repo_ids,
         selected_repo_names,
+        selected_repo_by_id,
+        selected_repo_by_name,
         ticker,
         as_of,
     )
@@ -851,8 +885,8 @@ def calculate_developer_ecosystem_features(
         source_as_of[map_key] = selected_item.mapping.known_at
     for selected_package in used_pkg:
         pkg_obs = selected_package.observation
-        key = _package_provenance_key(pkg_obs)
-        provenance[key] = _provenance_payload(pkg_obs)
+        key = _package_provenance_key(pkg_obs, selected_package.mapping.provider)
+        provenance[key] = _provenance_payload(pkg_obs, selected_package.mapping.provider)
         source_as_of[key] = pkg_obs.available_at
         map_key = _mapping_key(selected_package.mapping)
         provenance[map_key] = _mapping_identity(selected_package.mapping)
@@ -872,21 +906,11 @@ def calculate_developer_ecosystem_features(
     matched_repo_ids = {item.observation.repository_id for item in matched_current_90}
     matched_prior_repo_ids = {item.observation.repository_id for item in matched_prior_90}
     matched_package_ids = {
-        (
-            item.observation.provider,
-            item.observation.ecosystem.value,
-            _normalize_package_name(item.observation),
-            item.observation.repository_id or "",
-        )
+        canonical_package_series_identity(item.observation, item.mapping.provider)
         for item in matched_package_current_90
     }
     matched_prior_package_ids = {
-        (
-            item.observation.provider,
-            item.observation.ecosystem.value,
-            _normalize_package_name(item.observation),
-            item.observation.repository_id or "",
-        )
+        canonical_package_series_identity(item.observation, item.mapping.provider)
         for item in matched_package_prior_90
     }
     completeness = min(1.0, len(current_repo_ids) / max(1, len(eligible_repo_ids)))

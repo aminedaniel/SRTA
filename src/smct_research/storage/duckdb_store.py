@@ -19,6 +19,7 @@ from smct_research.developer_ecosystem.models import (
     RepositoryMapping,
     RepositoryObservation,
     canonical_mapping_identity,
+    canonical_package_series_identity,
 )
 from smct_research.estimates.models import ConsensusEstimate
 from smct_research.financials.models import FeatureValue, FinancialObservation
@@ -285,7 +286,7 @@ def store_package_observations(
 ) -> None:
     for item in observations:
         payload = item.model_dump_json()
-        logical = f"{item.provider}|{item.ecosystem}|{item.package_name.strip().lower()}|{item.repository_id or ''}|{item.observation_window_start.isoformat()}|{item.observation_window_end.isoformat()}|{item.available_at.isoformat()}"
+        logical = "|".join(canonical_package_series_identity(item, include_interval=True))
         _store_immutable_json(
             self,
             "developer_package_observations",

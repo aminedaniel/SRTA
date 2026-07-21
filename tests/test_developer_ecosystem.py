@@ -885,3 +885,145 @@ def test_interval_contract_config_validation_and_canonical_mapping_identity(tmp_
         [sys.executable, "-c", script], text=True, env={"PYTHONPATH": "src"}
     )
     assert first == second
+
+
+def test_package_series_identity_scopes_repository_provider_and_linkage(tmp_path: Path) -> None:
+    import json
+
+    from smct_research.developer_ecosystem.models import (
+        PackageSelector,
+        canonical_package_series_identity,
+    )
+    from smct_research.developer_ecosystem.providers import OfflinePackageHistoryProvider
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    core = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    sdk = next(item for item in repos if item.provider_record_id == "acme-sdk-current")
+    base_map = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    repo_core = base_map.model_copy(
+        update={"organization": None, "repository_id": "r1", "package_selectors": ()}
+    )
+    repo_sdk = base_map.model_copy(
+        update={"organization": None, "repository_id": "r2", "package_selectors": ()}
+    )
+    package_map = base_map.model_copy(
+        update={
+            "organization": None,
+            "package_selectors": (
+                PackageSelector.model_validate({"ecosystem": "pypi", "package_name": "acme-sdk"}),
+            ),
+        }
+    )
+    pkg = OfflinePackageHistoryProvider(EX / "packages.json").fetch_package_history("ACME")[1]
+
+    provider_collision_map = package_map.model_copy(update={"provider": "gitlab"})
+    provider_collision = calculate_developer_ecosystem_features(
+        [sdk], [repo_sdk, provider_collision_map], "ACME", AS_OF, [pkg]
+    )
+    assert "linked package evidence rejected" in " ".join(provider_collision.diagnostics)
+
+    contradictory = pkg.model_copy(
+        update={"repository_id": "r2", "repository_owner": "acme", "repository_name": "core"}
+    )
+    contradictory_out = calculate_developer_ecosystem_features(
+        [core, sdk], [repo_core, repo_sdk, package_map], "ACME", AS_OF, [contradictory]
+    )
+    assert "contradictory repository identity" in " ".join(contradictory_out.diagnostics)
+
+    current_repo_a = pkg.model_copy(update={"repository_owner": "acme", "repository_name": "sdk"})
+    prior_repo_b = pkg.model_copy(
+        update={
+            "provider_record_id": "pkg-prior-other-repo",
+            "repository_id": "r1",
+            "repository_owner": "acme",
+            "repository_name": "core",
+            "download_count": 9999,
+            "observation_window_start": datetime.fromisoformat("2026-01-18T00:00:00+00:00"),
+            "observation_window_end": datetime.fromisoformat("2026-04-17T00:00:00+00:00"),
+            "available_at": datetime.fromisoformat("2026-04-18T00:00:00+00:00"),
+        }
+    )
+    mismatch = calculate_developer_ecosystem_features(
+        [core, sdk],
+        [repo_core, repo_sdk, package_map],
+        "ACME",
+        AS_OF,
+        [current_repo_a, prior_repo_b],
+    )
+    assert mismatch.features["developer_package_download_growth_90d"] is None
+    assert "unmatched-prior package series" in " ".join(mismatch.diagnostics)
+
+    other_repo_pkg = current_repo_a.model_copy(
+        update={
+            "provider_record_id": "same-name-other-repo",
+            "repository_id": "r1",
+            "repository_name": "core",
+        }
+    )
+    assert canonical_package_series_identity(
+        current_repo_a, "github", grain_days=90
+    ) != canonical_package_series_identity(other_repo_pkg, "github", grain_days=90)
+
+    pkg_file = tmp_path / "packages.json"
+    pkg_file.write_text(
+        json.dumps([current_repo_a.model_dump(mode="json"), other_repo_pkg.model_dump(mode="json")])
+    )
+    loaded = OfflinePackageHistoryProvider(pkg_file).fetch_package_history("ACME")
+    assert len(loaded) == 2
+    store = LocalAnalyticalStore(tmp_path / "pkg_identity.duckdb")
+    store.store_package_observations(loaded)
+    round_trip = store.load_package_observations()
+    store.close()
+    assert {
+        canonical_package_series_identity(item, include_interval=True) for item in round_trip
+    } == {canonical_package_series_identity(item, include_interval=True) for item in loaded}
+
+
+def test_repository_mapping_deduplication_and_normalized_identity() -> None:
+    from smct_research.developer_ecosystem.models import PackageSelector, canonical_mapping_identity
+
+    repos = OfflineDeveloperHistoryProvider(EX / "history.json").fetch_repository_history("ACME")
+    core = next(item for item in repos if item.provider_record_id == "acme-core-current")
+    base = load_repository_mappings(EX / "mappings.json", "ACME")[0]
+    exact = base.model_copy(
+        update={"organization": None, "owner": "ACME", "name": " Core ", "package_selectors": ()}
+    )
+    duplicate = base.model_copy(
+        update={"organization": None, "owner": "acme", "name": "core", "package_selectors": ()}
+    )
+    assert canonical_mapping_identity(exact) == canonical_mapping_identity(duplicate)
+    duplicate_result = calculate_developer_ecosystem_features(
+        [core], [exact, duplicate], "ACME", AS_OF, []
+    )
+    assert duplicate_result.features["developer_active_contributors_90d"] is not None
+
+    exclusion = exact.model_copy(update={"include": False})
+    exclusion_duplicate = duplicate.model_copy(update={"include": False})
+    excluded = calculate_developer_ecosystem_features(
+        [core], [exclusion, exclusion_duplicate], "ACME", AS_OF, []
+    )
+    assert excluded.features["developer_active_contributors_90d"] is None
+
+    selector_ws = PackageSelector.model_validate(
+        {
+            "ecosystem": "pypi",
+            "package_name": " Acme-SDK ",
+            "repository_owner": " ACME ",
+            "repository_name": " SDK ",
+        }
+    )
+    selector_norm = PackageSelector.model_validate(
+        {
+            "ecosystem": "pypi",
+            "package_name": "acme-sdk",
+            "repository_owner": "acme",
+            "repository_name": "sdk",
+        }
+    )
+    map_ws = base.model_copy(update={"package_selectors": (selector_ws,)})
+    map_norm = base.model_copy(update={"package_selectors": (selector_norm,)})
+    assert canonical_mapping_identity(map_ws) == canonical_mapping_identity(map_norm)
+
+    conflicting = duplicate.model_copy(update={"weight": duplicate.weight + 0.1})
+    with pytest.raises(ValueError, match="ambiguous repository mapping"):
+        calculate_developer_ecosystem_features([core], [duplicate, conflicting], "ACME", AS_OF, [])

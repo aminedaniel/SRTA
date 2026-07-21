@@ -213,8 +213,8 @@ class PackageObservation(BaseModel, frozen=True):
             name = self.repository_name.strip()
             if not owner or not name:
                 raise ValueError("package observation repository owner/name cannot be empty")
-            object.__setattr__(self, "repository_owner", owner)
-            object.__setattr__(self, "repository_name", name)
+            object.__setattr__(self, "repository_owner", owner.lower())
+            object.__setattr__(self, "repository_name", name.lower())
         return self
 
 
@@ -234,20 +234,23 @@ class PackageSelector(BaseModel, frozen=True):
             if not provider:
                 raise ValueError("package selector provider cannot be empty")
             object.__setattr__(self, "provider", provider)
-        if self.repository_id is not None and not self.repository_id.strip():
-            raise ValueError("package selector repository_id cannot be empty")
+        if self.repository_id is not None:
+            repository_id = self.repository_id.strip()
+            if not repository_id:
+                raise ValueError("package selector repository_id cannot be empty")
+            object.__setattr__(self, "repository_id", repository_id)
         if self.repository_owner is not None:
             owner = self.repository_owner.strip()
             if not owner:
                 raise ValueError("package selector repository_owner cannot be empty")
-            object.__setattr__(self, "repository_owner", owner)
+            object.__setattr__(self, "repository_owner", owner.lower())
         if self.repository_name is not None:
             name = self.repository_name.strip()
             if not name:
                 raise ValueError("package selector repository_name cannot be empty")
             if not self.repository_owner:
                 raise ValueError("package selector repository_name requires repository_owner")
-            object.__setattr__(self, "repository_name", name)
+            object.__setattr__(self, "repository_name", name.lower())
         return self
 
 
@@ -276,7 +279,30 @@ class RepositoryMapping(BaseModel, frozen=True):
         object.__setattr__(self, "known_at", normalize_utc(self.known_at))
         if self.effective_to is not None:
             object.__setattr__(self, "effective_to", normalize_utc(self.effective_to))
-        object.__setattr__(self, "provider", self.provider.strip().lower())
+        provider = self.provider.strip().lower()
+        if not provider:
+            raise ValueError("repository mapping provider cannot be empty")
+        object.__setattr__(self, "provider", provider)
+        if self.repository_id is not None:
+            repository_id = self.repository_id.strip()
+            if not repository_id:
+                raise ValueError("repository_id cannot be empty")
+            object.__setattr__(self, "repository_id", repository_id)
+        if self.owner is not None:
+            owner = self.owner.strip()
+            if not owner:
+                raise ValueError("mapping owner cannot be empty")
+            object.__setattr__(self, "owner", owner.lower())
+        if self.name is not None:
+            name = self.name.strip()
+            if not name:
+                raise ValueError("mapping repository name cannot be empty")
+            object.__setattr__(self, "name", name.lower())
+        if self.organization is not None:
+            organization = self.organization.strip()
+            if not organization:
+                raise ValueError("mapping organization cannot be empty")
+            object.__setattr__(self, "organization", organization.lower())
         if self.name and not self.owner:
             raise ValueError("repository name mappings require an owner")
         if self.package_names:
@@ -311,9 +337,49 @@ class RepositoryMapping(BaseModel, frozen=True):
         return True
 
 
+def canonical_package_series_identity(
+    package: PackageObservation,
+    repository_provider: str | None = None,
+    grain_days: int | None = None,
+    include_interval: bool = False,
+) -> tuple[str, ...]:
+    identity: tuple[str, ...] = (
+        package.provider.strip().lower(),
+        package.ecosystem.value,
+        package.package_name.strip().lower(),
+        (repository_provider or "").strip().lower(),
+        (package.repository_id or "").strip(),
+        (package.repository_owner or "").strip().lower(),
+        (package.repository_name or "").strip().lower(),
+    )
+    if grain_days is not None:
+        identity = (*identity, f"{grain_days}d")
+    if include_interval:
+        identity = (
+            *identity,
+            package.observation_window_start.isoformat(),
+            package.observation_window_end.isoformat(),
+            package.available_at.isoformat(),
+        )
+    return identity
+
+
 def canonical_mapping_identity(mapping: RepositoryMapping) -> str:
     payload = mapping.model_dump(mode="json")
-    selectors = payload.get("package_selectors") or []
+    for key in ("provider", "owner", "name", "organization"):
+        if payload.get(key) is not None:
+            payload[key] = str(payload[key]).strip().lower()
+    if payload.get("repository_id") is not None:
+        payload["repository_id"] = str(payload["repository_id"]).strip()
+    selectors = []
+    for selector in payload.get("package_selectors") or []:
+        normalized = dict(selector)
+        for key in ("ecosystem", "package_name", "provider", "repository_owner", "repository_name"):
+            if normalized.get(key) is not None:
+                normalized[key] = str(normalized[key]).strip().lower()
+        if normalized.get("repository_id") is not None:
+            normalized["repository_id"] = str(normalized["repository_id"]).strip()
+        selectors.append(normalized)
     payload["package_selectors"] = sorted(
         selectors,
         key=lambda item: (

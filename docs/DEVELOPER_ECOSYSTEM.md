@@ -22,7 +22,7 @@ Only observations with `available_at` on or before the evaluation timestamp are 
 
 Each repository or package observation is treated as an aggregate for its declared interval. For a requested 30-, 90-, or 180-day window, B1 uses only observations whose `observation_window_start` and `observation_window_end` match the requested current or immediately-prior comparable interval and whose duration matches the requested grain within the configured tolerance. The default tolerance is one day for inclusive-boundary differences.
 
-The calculation selects at most one canonical observation per provider/repository/window or provider/ecosystem/package/window. It does not use `available_at` as the activity timestamp, does not rescale a 90-day aggregate into 30-day velocity, and does not double-count overlapping rolling snapshots. If the required grain is absent, the window features remain missing.
+The calculation selects at most one canonical observation per provider/repository/window or provider/ecosystem/package/repository-identity/window. Package series identity includes package provider, ecosystem, normalized package name, resolved repository provider, repository ID, and repository owner/name when present. It does not use `available_at` as the activity timestamp, does not rescale a 90-day aggregate into 30-day velocity, and does not double-count overlapping rolling snapshots. If the required grain is absent, the window features remain missing.
 
 ## Missing-current versus true-zero semantics
 
@@ -30,15 +30,15 @@ No eligible current observation means current levels, velocities, and growth fea
 
 ## Company-to-repository mapping
 
-Mappings support organizations, selected repositories outside a primary organization, exclusions, repository-role weights, first-party/community classification, package names, and effective dates.
+Mappings support organizations, selected repositories outside a primary organization, exclusions, repository-role weights, first-party/community classification, typed package selectors, and effective dates.
 
 Mapping precedence is deterministic: explicit exclusions override broader includes; otherwise the most-specific active mapping controls the repository, ordered by exact repository ID, exact owner/name, then organization. Multiple conflicting mappings at the same specificity fail clearly. Only mappings effective and known as of the evaluation timestamp participate.
 
-Archived repositories, mirrors, and forks are excluded by default. Forks can be included only when the observation marks them as explicitly includable. Documentation-only and example repositories are not excluded by default, but their role weights come from configuration.
+Archived repositories, mirrors, and forks are excluded by default. Forks can be included only through an active `RepositoryMapping.include_forks` policy decision; provider observations cannot self-authorize fork inclusion. Documentation-only and example repositories are not excluded by default, but their role weights come from configuration.
 
 ## Package mapping rules
 
-Package evidence must match active approved company mappings through `package_names`. If a package is linked to a repository, that repository must be in the selected mapped repository set. Packages linked to excluded or wrong repositories are excluded. Unmapped packages produce diagnostics. Ambiguous package mappings fail clearly, and mapping effective/known dates apply to package evidence.
+Package evidence must match active approved company mappings through typed `package_selectors`; legacy `package_names` is rejected. Package repository identity is provider-scoped and may include repository ID, owner/name, or both. If a package is linked to a repository, that repository must resolve under the mapping's repository provider to the same selected, non-excluded repository. Packages linked to explicitly excluded, archived, mirrored, fork-disallowed, wrong-provider, or contradictory repositories are excluded with diagnostics. Unmapped packages produce diagnostics. Ambiguous package mappings fail clearly, and mapping effective/known dates apply to package evidence.
 
 ## Metrics
 
@@ -60,7 +60,7 @@ Star-spike diagnostics check corroboration from contributor growth, external-con
 
 ## Provenance
 
-Every used current and prior repository/package observation is recorded with provider-scoped keys such as `developer:repository:<provider>:<repository_id>:<provider_record_id>` and `developer:package:<provider>:<ecosystem>:<package_name>:<provider_record_id>`. Mapping provenance uses `developer:mapping:<provider>:<mapping-identity>`. Provenance preserves provider, provider record ID, source identifier or provenance, availability timestamp, interval, and repository/package identity. Excluded, unused, and future records are not added.
+Every used current and prior repository/package observation is recorded with provider-scoped keys. Package provenance keys include package provider, ecosystem, normalized package name, resolved repository provider, repository ID, repository owner/name, and provider record ID. Mapping provenance uses `developer:mapping:<provider>:<mapping-identity>`. Provenance preserves provider, provider record ID, source identifier or provenance, availability timestamp, interval, and repository/package identity. Excluded, unused, and future records are not added.
 
 ## Configuration loading
 
@@ -101,7 +101,7 @@ The first implementation is intentionally offline-first. It does not scrape GitH
 
 ## Matched-series growth
 
-Current levels and velocities use all valid current observations for the requested grain. Growth features use only matched current/prior pairs with the same provider, repository or package identity, and grain. Prior-only and current-only series are reported as unmatched diagnostics and are not interpreted as declines or growth from zero. Multiple providers for the same repository series are treated as ambiguous unless a future provider-precedence policy is added.
+Current levels and velocities use all valid current observations for the requested grain. Growth features use only matched current/prior pairs with the same provider, repository or complete package identity, and grain. Complete package identity includes package provider, ecosystem, normalized name, resolved repository provider, repository ID, and repository owner/name when present, so packages linked to different repositories do not match. Prior-only and current-only series are reported as unmatched diagnostics and are not interpreted as declines or growth from zero. Multiple providers for the same repository or package series are treated as ambiguous unless a future provider-precedence policy is added.
 
 ## Historical mapping policy
 
