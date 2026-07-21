@@ -1,0 +1,40 @@
+# Developer Ecosystem Momentum (B1) deterministic defaults.
+lookback_windows_days: [30, 90, 180]
+bot_filtering:
+  denylist_logins: [dependabot, dependabot[bot], renovate, renovate[bot], github-actions[bot], release-please[bot]]
+  bot_login_patterns: ["[bot]", "dependabot", "renovate", "github-actions", "release-please"]
+  allowlist_logins: []
+repository_role_weights:
+  core product: 1.0
+  SDK: 0.9
+  infrastructure: 0.75
+  integration: 0.65
+  experimental: 0.35
+  example: 0.25
+  documentation: 0.15
+  unknown: 0.5
+activity_thresholds:
+  meaningful_activity_events_90d: 3
+staleness_thresholds:
+  fresh_days: 30
+  stale_days: 180
+contributor_concentration_penalties:
+  top_one_warning_share: 0.35
+  top_one_high_risk_share: 0.50
+star_spike_diagnostics:
+  spike_growth_threshold: 0.75
+  corroborating_growth_threshold: 0.10
+package_adoption_weights:
+  download_growth: 0.18
+  dependent_package_growth: 0.10
+minimum_history_requirements:
+  minimum_mapped_repositories: 1
+  preferred_windows_days: 180
+b1_scoring_weights:
+  contributor_growth: 0.28
+  external_contributor_growth: 0.18
+  release_growth: 0.12
+  fork_growth: 0.07
+  maintenance_backlog_penalty: 0.18
+  breadth_bonus_cap: 0.10
+  bot_penalty: 0.15

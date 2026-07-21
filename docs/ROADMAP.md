@@ -18,12 +18,19 @@
 - Estimate-revision adapter interface
 - Reverse-DCF scenario model
 
+
+## Milestone 2.5 — Estimate revisions
+
+- Deterministic offline consensus normalization, immutable point-in-time snapshots, and fiscal-period-safe revision velocity
+- A3 Consensus Estimate Revision Velocity on the ranked discovery screen
+
 ## Milestone 3 — Underappreciated evidence
 
 - Form 4 cluster-buying parser
 - House and Senate periodic-transaction disclosure adapters
 - Congressional purchase aggregation with disclosure-lag controls
-- GitHub and package-ecosystem activity
+- Developer Ecosystem Momentum B1 offline feature calculation and signal scoring
+- Future online GitHub and package-ecosystem adapters
 - Hiring and organizational-change signals
 - Reddit awareness, sentiment, narrative, and manipulation filters
 - Product-review and web-interest adapters
@@ -43,8 +50,3 @@
 - Value-trap and permanent-impairment analysis
 - Signal ablation and combination analysis
 - Sector and market-regime robustness
-
-## Milestone 2.5 — Estimate revisions
-
-- Deterministic offline consensus normalization, immutable point-in-time snapshots, and fiscal-period-safe revision velocity
-- A3 Consensus Estimate Revision Velocity on the ranked discovery screen

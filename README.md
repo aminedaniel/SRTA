@@ -10,11 +10,16 @@ The initial implementation includes:
 - plugin-based signal registry
 - small/mid-cap technology universe filter
 - valuation-compression signal
+- Reverse DCF Expectations signal A2
+- Consensus Estimate Revision Velocity signal A3
+- Developer Ecosystem Momentum signal B1
 - Reddit awareness/crowding signal
 - congressional disclosed-purchasing signal
 - SEC Form 4 open-market cluster-buying corroboration signal
 - Renaissance Public Equity Activity (delayed SEC Form 13F corroboration)
 - composite research-priority scorer
+- ranked discovery workflow
+- Federal Reserve macro-regime context signal
 - CLI and tests
 
 ## Run locally
@@ -27,7 +32,7 @@ pytest
 smct evaluate examples/sample_snapshot.json
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and `docs/CONGRESSIONAL_DISCLOSURES.md` for the design and implementation sequence.
+See `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/DEVELOPER_ECOSYSTEM.md`, and `docs/CONGRESSIONAL_DISCLOSURES.md` for the design and implementation sequence.
 
 ## Milestone 2 local financial evidence
 

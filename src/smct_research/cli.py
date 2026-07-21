@@ -11,6 +11,13 @@ import typer
 
 from smct_research.core.models import FeatureSnapshot
 from smct_research.core.signal import SignalRegistry
+from smct_research.developer_ecosystem import (
+    OfflineDeveloperHistoryProvider,
+    OfflinePackageHistoryProvider,
+    calculate_developer_ecosystem_features,
+    load_repository_mappings,
+)
+from smct_research.developer_ecosystem.config import load_developer_ecosystem_config
 from smct_research.estimates.models import EstimateBasis, EstimateMetric, EstimatePeriod
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
@@ -20,6 +27,7 @@ from smct_research.screening.io import load_feature_snapshots, load_universe, wr
 from smct_research.screening.service import BatchEvaluationService
 from smct_research.screening.universe import UniversePolicy
 from smct_research.signals.congressional_purchases import CongressionalPurchaseSignal
+from smct_research.signals.developer_ecosystem_momentum import DeveloperEcosystemMomentumSignal
 from smct_research.signals.estimate_revision_velocity import ConsensusEstimateRevisionSignal
 from smct_research.signals.fed_regime import FederalReserveRegimeSignal
 from smct_research.signals.form4_cluster_buying import Form4ClusterBuyingSignal
@@ -43,6 +51,7 @@ def default_registry() -> SignalRegistry:
     registry.register(ValuationCompressionSignal())
     registry.register(ReverseDCFExpectationsSignal())
     registry.register(ConsensusEstimateRevisionSignal())
+    registry.register(DeveloperEcosystemMomentumSignal())
     registry.register(RedditAwarenessSignal())
     registry.register(CongressionalPurchaseSignal())
     registry.register(Form4ClusterBuyingSignal())
@@ -305,6 +314,67 @@ def revisions(
             "quality_score": result.quality.score,
             **{f"revision_{days}d": item.value for days, item in result.revisions.items()},
         }
+        with output_csv.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
+    typer.echo(rendered)
+
+
+@app.command("developer-velocity")
+def developer_velocity(
+    developer_history_file: Path,
+    ticker: str = typer.Option(...),
+    as_of: str = typer.Option(...),
+    mapping_file: Path | None = typer.Option(None),  # noqa: B008
+    package_history_file: Path | None = typer.Option(None),  # noqa: B008
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+    output_csv: Path | None = typer.Option(None),  # noqa: B008
+    include_repository: list[str] | None = typer.Option(None),  # noqa: B008
+    exclude_repository: list[str] | None = typer.Option(None),  # noqa: B008
+    config: Path | None = typer.Option(None),  # noqa: B008
+) -> None:
+    """Calculate deterministic offline developer ecosystem momentum features."""
+    try:
+        timestamp = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        if mapping_file is None:
+            raise typer.BadParameter("--mapping-file is required")
+        repos = OfflineDeveloperHistoryProvider(developer_history_file).fetch_repository_history(
+            ticker
+        )
+        if include_repository:
+            wanted = {item.lower() for item in include_repository}
+            repos = [
+                r
+                for r in repos
+                if f"{r.owner}/{r.name}".lower() in wanted or r.repository_id.lower() in wanted
+            ]
+        if exclude_repository:
+            blocked = {item.lower() for item in exclude_repository}
+            repos = [
+                r
+                for r in repos
+                if f"{r.owner}/{r.name}".lower() not in blocked
+                and r.repository_id.lower() not in blocked
+            ]
+        packages = (
+            OfflinePackageHistoryProvider(package_history_file).fetch_package_history(ticker)
+            if package_history_file
+            else []
+        )
+        mappings = load_repository_mappings(mapping_file, ticker)
+        dev_config = load_developer_ecosystem_config(config)
+        result = calculate_developer_ecosystem_features(
+            repos, mappings, ticker, timestamp, packages, config=dev_config
+        )
+    except (ProviderResponseError, ValueError, OSError, TypeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    payload = result.model_dump(mode="json")
+    rendered = json.dumps(payload, indent=2)
+    if output_json:
+        output_json.write_text(rendered + "\n")
+    if output_csv:
+        row = {"ticker": result.ticker, "quality_score": result.quality.score, **result.features}
         with output_csv.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row))
             writer.writeheader()

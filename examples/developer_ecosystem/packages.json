@@ -1,0 +1,36 @@
+{
+  "package_observations": [
+    {
+      "provider": "pypi",
+      "provider_record_id": "pkg-prior",
+      "ecosystem": "pypi",
+      "package_name": "acme-sdk",
+      "company_ticker": "ACME",
+      "repository_id": "r2",
+      "download_count": 1000,
+      "dependent_package_count": 10,
+      "release_count": 1,
+      "latest_release_at": "2026-04-01T00:00:00Z",
+      "observation_window_start": "2026-01-18T00:00:00Z",
+      "observation_window_end": "2026-04-17T00:00:00Z",
+      "available_at": "2026-04-18T00:00:00Z",
+      "source_identifier": "fixture:pypi"
+    },
+    {
+      "provider": "pypi",
+      "provider_record_id": "pkg-current",
+      "ecosystem": "pypi",
+      "package_name": "acme-sdk",
+      "company_ticker": "ACME",
+      "repository_id": "r2",
+      "download_count": 1350,
+      "dependent_package_count": 14,
+      "release_count": 2,
+      "latest_release_at": "2026-07-01T00:00:00Z",
+      "observation_window_start": "2026-04-18T00:00:00Z",
+      "observation_window_end": "2026-07-16T00:00:00Z",
+      "available_at": "2026-07-17T00:00:00Z",
+      "source_identifier": "fixture:pypi"
+    }
+  ]
+}
