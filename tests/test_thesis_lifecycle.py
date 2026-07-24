@@ -162,8 +162,12 @@ def test_multiple_thesis_series_chronological_selection(tmp_path) -> None:
         store.store_research_report(report)
         first = create_initial_thesis_record(report)
         store.store_thesis_record(first)
-        terminal = transition_thesis(
+        active = transition_thesis(
             first, ThesisStatus.ACTIVE, "review", first.effective_at, first.known_at
+        )
+        store.store_thesis_record(active)
+        terminal = transition_thesis(
+            active, ThesisStatus.INVALIDATED, "terminal", active.effective_at, active.known_at
         )
         store.store_thesis_record(terminal)
         second = create_initial_thesis_record(report).model_copy(
@@ -183,6 +187,139 @@ def test_multiple_thesis_series_chronological_selection(tmp_path) -> None:
         assert (
             store.load_thesis_as_of(datetime(2026, 7, 19, tzinfo=UTC), ticker="ACME").thesis_id
             == first.thesis_id
+        )
+    finally:
+        store.close()
+
+
+def _rehash(record):
+    from smct_research.research.thesis import thesis_record_hash
+
+    return record.model_copy(update={"canonical_content_hash": thesis_record_hash(record)})
+
+
+def test_thesis_record_internal_consistency_validation() -> None:
+    from pydantic import ValidationError
+
+    rec = create_initial_thesis_record(_report())
+    payload = rec.model_dump(mode="python")
+    payload["ticker"] = "NOPE"
+    with pytest.raises(ValidationError):
+        type(rec).model_validate(payload)
+    payload = rec.model_dump(mode="python")
+    payload["status"] = ThesisStatus.ACTIVE
+    with pytest.raises(ValidationError):
+        type(rec).model_validate(payload)
+    payload = rec.model_dump(mode="python")
+    payload["created_at"] = datetime(2026, 7, 18, tzinfo=UTC)
+    with pytest.raises(ValidationError):
+        type(rec).model_validate(payload)
+
+
+def test_source_report_continuity_and_new_series_terminal_gate(tmp_path) -> None:
+    from smct_research.research.models import (
+        CompanyResearchReport,
+        report_content_hash,
+        report_id_for_payload,
+    )
+
+    report = _report()
+    store = LocalAnalyticalStore(tmp_path / "r.duckdb")
+    try:
+        store.store_research_report(report)
+        first = create_initial_thesis_record(report)
+        store.store_thesis_record(first)
+        active = transition_thesis(
+            first, ThesisStatus.ACTIVE, "active", first.effective_at, first.known_at
+        )
+        store.store_thesis_record(active)
+        second_series = _rehash(
+            create_initial_thesis_record(report).model_copy(
+                update={"thesis_id": "thesis_new_active_blocked"}
+            )
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(second_series)
+        changed_data = report.model_dump(mode="python")
+        changed_data["provenance"] = {"alt": "source"}
+        changed_data["report_id"] = report_id_for_payload(changed_data)
+        changed_data["canonical_content_hash"] = report_content_hash(changed_data)
+        changed_report = CompanyResearchReport.model_validate(changed_data)
+        store.store_research_report(changed_report)
+        swapped = _rehash(
+            active.model_copy(
+                update={
+                    "version": 3,
+                    "prior_version": 2,
+                    "status": ThesisStatus.WEAKENING,
+                    "source_report_id": changed_report.report_id,
+                    "source_report_as_of": changed_report.as_of,
+                    "thesis": active.thesis.model_copy(update={"status": ThesisStatus.WEAKENING}),
+                }
+            )
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(swapped)
+        invalidated = transition_thesis(
+            active, ThesisStatus.INVALIDATED, "done", active.effective_at, active.known_at
+        )
+        store.store_thesis_record(invalidated)
+        permitted = _rehash(
+            create_initial_thesis_record(report).model_copy(
+                update={"thesis_id": "thesis_new_after_terminal"}
+            )
+        )
+        store.store_thesis_record(permitted)
+        assert (
+            store.load_latest_thesis(thesis_id="thesis_new_after_terminal", ticker="ACME").version
+            == 1
+        )
+        with pytest.raises(ValueError):
+            store.load_latest_thesis(thesis_id="thesis_new_after_terminal", ticker="NOPE")
+    finally:
+        store.close()
+
+
+def test_multiple_series_ambiguity_and_explicit_resolution(tmp_path) -> None:
+    report = _report()
+    store = LocalAnalyticalStore(tmp_path / "r.duckdb")
+    try:
+        store.store_research_report(report)
+        first = create_initial_thesis_record(report)
+        store.store_thesis_record(first)
+        active = transition_thesis(
+            first, ThesisStatus.ACTIVE, "active", first.effective_at, first.known_at
+        )
+        store.store_thesis_record(active)
+        terminal = transition_thesis(
+            active, ThesisStatus.FULLY_PRICED, "priced", active.effective_at, active.known_at
+        )
+        store.store_thesis_record(terminal)
+        second = _rehash(
+            create_initial_thesis_record(report).model_copy(
+                update={"thesis_id": "thesis_same_time"}
+            )
+        )
+        store.store_thesis_record(second)
+        second_active = transition_thesis(
+            second, ThesisStatus.ACTIVE, "active", second.effective_at, second.known_at
+        )
+        store.store_thesis_record(second_active)
+        second_terminal = transition_thesis(
+            second_active,
+            ThesisStatus.FULLY_PRICED,
+            "priced",
+            second_active.effective_at,
+            second_active.known_at,
+        )
+        store.store_thesis_record(second_terminal)
+        with pytest.raises(ValueError):
+            store.load_latest_thesis(ticker="ACME")
+        with pytest.raises(ValueError):
+            store.load_thesis_as_of(first.known_at, ticker="ACME")
+        assert (
+            store.load_latest_thesis(thesis_id="thesis_same_time", ticker="ACME").thesis_id
+            == "thesis_same_time"
         )
     finally:
         store.close()

@@ -1,7 +1,7 @@
 # ACME — Company Research Report
 
 ## Research snapshot
-- Report ID: report_36248294f9156adcee33e1bf
+- Report ID: report_4d6830429ccd78e886c28c49
 - As of: 2026-07-17T00:00:00+00:00
 - Company: Acme Analytics
 - Universe eligible: True
@@ -46,21 +46,21 @@ The market appears to price weaker growth than current signal evidence supports.
 ## Supporting evidence
 - A1: EV/Sales is 62% below its three-year median.
 - A1: Revenue growth is 5% below its three-year median.
-- A2: Annual dilution assumption: 1.5%.
-- A2: Base scenario upside/downside: 28%.
-- A2: Implied growth gap: -4%; margin gap: 1%.
-- A2: Terminal value represents 68% of enterprise value.
 - E2: Committee relevance: 70/100; repeat-buyer score: 60/100.
 - E2: Estimated disclosed purchase value: $500,000.
 - E2: Median disclosure lag: 20 days; latest purchase age: 10 days.
 - E2: Purchases/sales disclosed in 90 days: 5/0.
 - E2: Unique purchasing households: 4.
-- E3: 7-day triggered-cluster purchase value: $400,000 (0.100% of market capitalization).
-- E3: Newest qualifying filing age: 2 days.
-- E3: Unique qualifying buyers in seven days: 4.
 - F1: Attention percentile: 20; operating momentum: 75.
 - F1: Promotional-language share: 5.
 - F1: Thirty-day Reddit mentions: 50.
+- A2: Annual dilution assumption: 1.5%.
+- A2: Base scenario upside/downside: 28%.
+- A2: Implied growth gap: -4%; margin gap: 1%.
+- A2: Terminal value represents 68% of enterprise value.
+- E3: 7-day triggered-cluster purchase value: $400,000 (0.100% of market capitalization).
+- E3: Newest qualifying filing age: 2 days.
+- E3: Unique qualifying buyers in seven days: 4.
 - I1: 13F activity: increased; share-count change: 30.0%.
 - I1: Consecutive disclosed quarters held: 3; position-size percentile: 80.
 - I1: Disclosure age: 45 days; lag-adjusted decay: 0.70.
@@ -94,17 +94,18 @@ The market appears to price weaker growth than current signal evidence supports.
 
 ## Invalidation conditions
 - A1: principal positive evidence becomes stale, unavailable, or contradicted.
-- A2: dilution or share-count risk exceeds the level recorded in valuation evidence.
-- A2: reverse-DCF expectations gap closes because price rises or operating assumptions weaken.
 - E2: principal positive evidence becomes stale, unavailable, or contradicted.
 - F1: principal positive evidence becomes stale, unavailable, or contradicted.
+- A2: reverse-DCF expectations gap closes because price rises or operating assumptions weaken.
+- A2: dilution or share-count risk exceeds the level recorded in valuation evidence.
 
 ## Missing and stale evidence
 ### Missing evidence
 - A3: unavailable
 - B1: unavailable
-- signal_unavailable:A3:'A3 missing required features: eps_revision_30d, eps_revision_quality_score'
-- signal_unavailable:B1:'B1 missing required features: developer_momentum_quality_score, developer_data_quality_score'
+- M1: composite weight unavailable
+- signal\_unavailable:A3:'A3 missing required features: eps\_revision\_30d, eps\_revision\_quality\_score'
+- signal\_unavailable:B1:'B1 missing required features: developer\_momentum\_quality\_score, developer\_data\_quality\_score'
 ### Unavailable signals
 - A3
 - B1

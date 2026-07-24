@@ -432,6 +432,10 @@ def _validate_thesis_for_store(self: LocalAnalyticalStore, record: ThesisRecord)
     if record.version == 1:
         if record.status.value != "draft" or record.prior_version is not None:
             raise ValueError("initial thesis version must be draft without prior version")
+        latest_existing = _latest_records_by_series(load_thesis_history(self, ticker=record.ticker))
+        open_series = [item for item in latest_existing if item.status not in TERMINAL_STATUSES]
+        if open_series:
+            raise ValueError("cannot start a new thesis series while another series is nonterminal")
         return
     prior_row = self.connection.execute(
         "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=? AND version=?",
@@ -442,6 +446,11 @@ def _validate_thesis_for_store(self: LocalAnalyticalStore, record: ThesisRecord)
     prior = _validate_loaded_thesis(prior_row)
     if prior.thesis_id != record.thesis_id or prior.ticker != record.ticker:
         raise ValueError("thesis identity changed across versions")
+    if (
+        record.source_report_id != prior.source_report_id
+        or record.source_report_as_of != prior.source_report_as_of
+    ):
+        raise ValueError("source report cannot change within a thesis series")
     if record.prior_version != prior.version or record.version != prior.version + 1:
         raise ValueError("invalid thesis version sequence")
     if prior.status in TERMINAL_STATUSES:
@@ -505,29 +514,45 @@ def _validate_loaded_thesis(row: tuple[str, str]) -> ThesisRecord:
     return record
 
 
+def _chronological_key(record: ThesisRecord) -> tuple[datetime, datetime, int]:
+    return (record.known_at, record.effective_at, record.version)
+
+
 def _history_sort_key(record: ThesisRecord) -> tuple[datetime, datetime, int, str]:
-    return (record.known_at, record.effective_at, record.version, record.thesis_id)
+    return (*_chronological_key(record), record.thesis_id)
+
+
+def _latest_records_by_series(records: list[ThesisRecord]) -> list[ThesisRecord]:
+    latest: dict[str, ThesisRecord] = {}
+    for record in sorted(records, key=_history_sort_key):
+        latest[record.thesis_id] = record
+    return sorted(latest.values(), key=_history_sort_key)
 
 
 def load_thesis_history(
     self: LocalAnalyticalStore, thesis_id: str | None = None, ticker: str | None = None
 ) -> list[ThesisRecord]:
     _ensure_research_tables(self)
+    ticker_norm = ticker.upper().strip() if ticker else None
     if thesis_id:
         rows = self.connection.execute(
             "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=?",
             [thesis_id],
         ).fetchall()
-    elif ticker:
+    elif ticker_norm:
         rows = self.connection.execute(
             "SELECT content_hash, payload_json FROM research_thesis_versions WHERE ticker=?",
-            [ticker.upper().strip()],
+            [ticker_norm],
         ).fetchall()
     else:
         rows = self.connection.execute(
             "SELECT content_hash, payload_json FROM research_thesis_versions"
         ).fetchall()
     records = [_validate_loaded_thesis(r) for r in rows]
+    if ticker_norm is not None:
+        mismatched = [record for record in records if record.ticker != ticker_norm]
+        if mismatched:
+            raise ValueError("ticker and thesis_id do not match")
     return sorted(records, key=_history_sort_key)
 
 
@@ -537,12 +562,12 @@ def _select_record(
     if not records:
         return None
     records = sorted(records, key=_history_sort_key)
-    latest = records[-1]
-    tied = [r for r in records if _history_sort_key(r) == _history_sort_key(latest)]
-    series = {r.thesis_id for r in tied}
+    latest_key = max(_chronological_key(record) for record in records)
+    tied = [record for record in records if _chronological_key(record) == latest_key]
+    series = {record.thesis_id for record in tied}
     if thesis_id is None and ticker is not None and len(series) > 1:
         raise ValueError("multiple thesis series are ambiguous; pass --thesis-id")
-    return latest
+    return sorted(tied, key=_history_sort_key)[-1]
 
 
 def load_latest_thesis(

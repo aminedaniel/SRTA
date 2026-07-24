@@ -23,7 +23,7 @@ from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
 from smct_research.research.models import canonical_json
-from smct_research.research.render import render_markdown
+from smct_research.research.render import render_markdown, serialize_report_json
 from smct_research.research.report import ResearchReportBuilder
 from smct_research.research.thesis import create_initial_thesis_record, transition_thesis
 from smct_research.scoring.composite import CompositeResearchScorer
@@ -439,7 +439,7 @@ def report_command(
             matches[0], snapshots[wanted], selected, evaluation_as_of
         )
         if output_json:
-            output_json.write_text(canonical_json(report.model_dump(mode="python")) + "\n")
+            output_json.write_text(serialize_report_json(report))
         if output_markdown:
             output_markdown.write_text(render_markdown(report))
         if database and (save_report or create_thesis):

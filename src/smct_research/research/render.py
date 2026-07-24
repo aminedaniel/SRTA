@@ -1,14 +1,53 @@
 from __future__ import annotations
 
-from smct_research.research.models import CompanyResearchReport
+import json
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel
+
+from smct_research.core.models import normalize_utc
+from smct_research.research.models import CompanyResearchReport, FrozenDict
 
 
 def _esc(text: object) -> str:
-    return str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").strip()
+    escaped = str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+    for char in ("*", "_", "`", "[", "]", "<", ">", "#"):
+        escaped = escaped.replace(char, "\\" + char)
+    return escaped.strip()
 
 
 def _bullets(items: tuple[str, ...] | list[str]) -> str:
     return "\n".join(f"- {_esc(i)}" for i in items) if items else "- Missing"
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _json_ready(value.model_dump(mode="python"))
+    if isinstance(value, datetime):
+        return normalize_utc(value).isoformat().replace("+00:00", "Z")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, (dict, FrozenDict)):
+        return {
+            str(k): _json_ready(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(v) for v in value]
+    return value
+
+
+def serialize_report_json(report: CompanyResearchReport) -> str:
+    """Serialize reports deterministically while preserving ranked list order.
+
+    The returned JSON always ends with a single newline. Report models already canonicalize
+    unordered fields; ranked fields are emitted in model order.
+    """
+    return (
+        json.dumps(_json_ready(report), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    )
 
 
 def render_markdown(report: CompanyResearchReport) -> str:
@@ -24,10 +63,10 @@ def render_markdown(report: CompanyResearchReport) -> str:
     ]
     lines += [
         "## Executive summary",
-        report.executive_summary,
+        _esc(report.executive_summary),
         "",
         "## Variant perception",
-        report.variant_perception,
+        _esc(report.variant_perception),
         "",
     ]
     lines += [

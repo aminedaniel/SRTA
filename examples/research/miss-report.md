@@ -41,14 +41,14 @@ Evidence is incomplete and does not yet support a differentiated thesis.
 - Terminal-value dependence: Missing
 - Dilution/share-count risk: Missing
 - Missing valuation fields:
-- current_market_price
-- implied_expectations_gap
-- implied_revenue_growth
-- implied_terminal_margin
-- reverse_dcf_base_value
-- reverse_dcf_conservative_value
-- reverse_dcf_optimistic_value
-- terminal_value_dependence
+- current\_market\_price
+- implied\_expectations\_gap
+- implied\_revenue\_growth
+- implied\_terminal\_margin
+- reverse\_dcf\_base\_value
+- reverse\_dcf\_conservative\_value
+- reverse\_dcf\_optimistic\_value
+- terminal\_value\_dependence
 
 ## Supporting evidence
 - Missing
@@ -79,15 +79,15 @@ Evidence is incomplete and does not yet support a differentiated thesis.
 - F1: unavailable
 - I1: unavailable
 - M1: unavailable
-- signal_unavailable:A1:'A1 missing required features: ev_sales_3y_median, revenue_growth_current, revenue_growth_3y_median'
-- signal_unavailable:A2:'A2 missing required features: dcf_base_value_per_share, dcf_base_upside_percent, reverse_dcf_implied_revenue_cagr, reverse_dcf_implied_terminal_fcf_margin, dcf_terminal_value_share, dcf_model_quality_score, reverse_dcf_growth_gap, reverse_dcf_margin_gap'
-- signal_unavailable:A3:'A3 missing required features: eps_revision_30d, eps_revision_quality_score'
-- signal_unavailable:B1:'B1 missing required features: developer_momentum_quality_score, developer_data_quality_score'
-- signal_unavailable:E2:'E2 missing required features: congress_purchase_count_90d, congress_sale_count_90d, congress_unique_buyers_90d, congress_estimated_purchase_usd_90d, congress_latest_purchase_age_days, congress_median_disclosure_lag_days, congress_committee_relevance_score, congress_repeat_buyer_score'
-- signal_unavailable:E3:'E3 missing required features: form4_unique_insiders_buying_7d, form4_aggregate_purchase_value_7d, form4_purchase_value_market_cap_ratio_7d, form4_largest_individual_purchase_7d, form4_officer_director_10pct_participants_7d, form4_repeated_purchase_insiders_7d, form4_filing_age_days, form4_cluster_buying_7d'
-- signal_unavailable:F1:'F1 missing required features: reddit_mentions_30d, reddit_mentions_percentile, operating_momentum_score, promotional_language_share'
-- signal_unavailable:I1:'I1 missing required features: renaissance_13f_status, renaissance_13f_share_change_percent, renaissance_13f_consecutive_quarters_held, renaissance_13f_position_size_percentile, renaissance_13f_disclosure_age_days, renaissance_13f_lag_decay'
-- signal_unavailable:M1:'M1 missing required features: liquidity_regime, monetary_policy_regime, regime_confidence'
+- signal\_unavailable:A1:'A1 missing required features: ev\_sales\_3y\_median, revenue\_growth\_current, revenue\_growth\_3y\_median'
+- signal\_unavailable:A2:'A2 missing required features: dcf\_base\_value\_per\_share, dcf\_base\_upside\_percent, reverse\_dcf\_implied\_revenue\_cagr, reverse\_dcf\_implied\_terminal\_fcf\_margin, dcf\_terminal\_value\_share, dcf\_model\_quality\_score, reverse\_dcf\_growth\_gap, reverse\_dcf\_margin\_gap'
+- signal\_unavailable:A3:'A3 missing required features: eps\_revision\_30d, eps\_revision\_quality\_score'
+- signal\_unavailable:B1:'B1 missing required features: developer\_momentum\_quality\_score, developer\_data\_quality\_score'
+- signal\_unavailable:E2:'E2 missing required features: congress\_purchase\_count\_90d, congress\_sale\_count\_90d, congress\_unique\_buyers\_90d, congress\_estimated\_purchase\_usd\_90d, congress\_latest\_purchase\_age\_days, congress\_median\_disclosure\_lag\_days, congress\_committee\_relevance\_score, congress\_repeat\_buyer\_score'
+- signal\_unavailable:E3:'E3 missing required features: form4\_unique\_insiders\_buying\_7d, form4\_aggregate\_purchase\_value\_7d, form4\_purchase\_value\_market\_cap\_ratio\_7d, form4\_largest\_individual\_purchase\_7d, form4\_officer\_director\_10pct\_participants\_7d, form4\_repeated\_purchase\_insiders\_7d, form4\_filing\_age\_days, form4\_cluster\_buying\_7d'
+- signal\_unavailable:F1:'F1 missing required features: reddit\_mentions\_30d, reddit\_mentions\_percentile, operating\_momentum\_score, promotional\_language\_share'
+- signal\_unavailable:I1:'I1 missing required features: renaissance\_13f\_status, renaissance\_13f\_share\_change\_percent, renaissance\_13f\_consecutive\_quarters\_held, renaissance\_13f\_position\_size\_percentile, renaissance\_13f\_disclosure\_age\_days, renaissance\_13f\_lag\_decay'
+- signal\_unavailable:M1:'M1 missing required features: liquidity\_regime, monetary\_policy\_regime, regime\_confidence'
 ### Unavailable signals
 - A1
 - A2

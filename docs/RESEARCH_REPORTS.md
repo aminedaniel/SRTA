@@ -12,7 +12,7 @@ A report's `report_id` and `canonical_content_hash` are derived from one canonic
 
 ## Canonical versus ranked ordering
 
-Semantically unordered fields are recursively canonicalized: dictionaries sort by key, nested metadata is canonicalized, unordered lists are sorted without collapsing type distinctions, timestamps are UTC normalized, and enums serialize to values. Signal assessments are sorted by `signal_id`. Supporting and contradictory evidence are ranked by contribution (`signal score × signal confidence × configured composite weight`) and then become canonical report content. Catalysts are canonically sorted unless a future workflow explicitly ranks them.
+Semantically unordered fields are recursively canonicalized: dictionaries sort by key, nested metadata is canonicalized, unordered lists are sorted without collapsing type distinctions, timestamps are UTC normalized, and enums serialize to values. Signal assessments are sorted by `signal_id`. Supporting evidence, contradictory evidence, contextual evidence, and invalidation conditions preserve builder order; positive and negative evidence are ranked by weighted contribution, then signal ID, then stable evidence text. The report-specific JSON serializer preserves those ranked lists while sorting mapping keys and ending with a single newline. Catalysts are canonically sorted unless a future workflow explicitly ranks them.
 
 ## Report schema
 
@@ -22,7 +22,7 @@ Semantically unordered fields are recursively canonicalized: dictionaries sort b
 
 ## Unknown signal weights
 
-The report layer never silently assigns an unknown signal a default composite weight. If an evaluated signal lacks a configured composite weight, the signal remains visible but its weighted contribution is `Unavailable`, making the missing weight explicit in JSON and Markdown.
+The report layer never silently assigns an unknown signal a default composite weight. If an evaluated signal lacks a configured composite weight, the signal remains visible but its weighted contribution is `Unavailable`, and missing evidence includes a deterministic diagnostic such as `M1: composite weight unavailable`. Unknown-weight signals are excluded from contribution-ranked supporting and contradictory evidence until a weight is configured.
 
 ## Evidence ordering
 
@@ -51,15 +51,15 @@ Allowed transitions are:
 
 ## Append-only persistence and integrity checks
 
-DuckDB tables `research_reports` and `research_thesis_versions` store immutable JSON payloads and content hashes. Exact duplicate writes are idempotent. Conflicting immutable records, ticker mixing for one thesis ID, skipped versions, incorrect prior-version references, corrupt hashes, invalid status transitions, terminal continuations, and regressing timestamps raise controlled errors. Persistence recalculates report IDs, report hashes, thesis hashes, and lifecycle invariants rather than trusting self-asserted payload values.
+DuckDB tables `research_reports` and `research_thesis_versions` store immutable JSON payloads and content hashes. Exact duplicate writes are idempotent. Conflicting immutable records, ticker mixing for one thesis ID, skipped versions, incorrect prior-version references, corrupt hashes, invalid status transitions, terminal continuations, source-report swaps within an existing thesis series, internally inconsistent thesis payloads, and regressing timestamps raise controlled errors. Persistence recalculates report IDs, report hashes, thesis hashes, and lifecycle invariants rather than trusting self-asserted payload values.
 
 ## Source-report integrity
 
-Every thesis version references a persisted report. Persistence verifies that the source report exists, report ticker matches thesis ticker, report `as_of` matches `source_report_as_of`, and the report was known by the thesis version. A transition that retains the prior report preserves the same source-report reference explicitly.
+Every thesis version references a persisted report. Persistence verifies that the source report exists, report ticker matches thesis ticker, report `as_of` matches `source_report_as_of`, and the report was known by the thesis version. A transition retains the prior report and persistence enforces that `source_report_id` and `source_report_as_of` cannot change within a thesis series. Incorporating a new report into an existing thesis is intentionally left for a later explicitly tested feature.
 
 ## Multiple thesis series
 
-A ticker may have multiple thesis series after a terminal thesis. Ticker-only latest and as-of lookups use chronological ordering by `known_at`, `effective_at`, version, and thesis ID as a deterministic tie-breaker. If a query remains ambiguous, CLI users must pass `--thesis-id`. `thesis-list` always prints thesis IDs so separate series can be identified.
+A ticker may start a new thesis series only after every existing series for that ticker is terminal (`invalidated` or `fully_priced`). A ticker may have multiple thesis series after terminal completion. Ticker-only latest and as-of lookups use chronological ordering by `known_at`, `effective_at`, version, and thesis ID as a deterministic tie-breaker. If a query remains ambiguous, CLI users must pass `--thesis-id`. `thesis-list` always prints thesis IDs so separate series can be identified.
 
 ## CLI examples and controlled errors
 

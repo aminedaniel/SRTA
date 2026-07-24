@@ -7,12 +7,59 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from smct_research.core.models import ResearchThesis, SignalDirection, ThesisStatus, normalize_utc
 
 SCHEMA_VERSION = "research_report.v1"
 THESIS_SCHEMA_VERSION = "thesis_record.v1"
+
+
+class FrozenDict(dict[str, Any]):
+    """Read-only dict subclass that serializes like a dict in Pydantic."""
+
+    def __init__(self, data: dict[str, Any] | None = None) -> None:
+        dict.__init__(self)
+        for key, value in (data or {}).items():
+            dict.__setitem__(self, key, _freeze_value(value))
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        raise TypeError("FrozenDict is immutable")
+
+    def __delitem__(self, key: str) -> None:
+        raise TypeError("FrozenDict is immutable")
+
+    def clear(self) -> None:
+        raise TypeError("FrozenDict is immutable")
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        raise TypeError("FrozenDict is immutable")
+
+    def popitem(self) -> tuple[str, Any]:
+        raise TypeError("FrozenDict is immutable")
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        raise TypeError("FrozenDict is immutable")
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("FrozenDict is immutable")
+
+
+def _freeze_value(value: Any) -> Any:
+    if isinstance(value, FrozenDict):
+        return value
+    if isinstance(value, dict):
+        return FrozenDict({str(k): v for k, v in value.items()})
+    if isinstance(value, list | tuple | set | frozenset):
+        return tuple(_freeze_value(v) for v in value)
+    return value
 
 
 def canonicalize(value: Any, *, sort_lists: bool = True) -> Any:
@@ -63,12 +110,16 @@ def _canonical_tuple(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     return tuple(canonicalize(tuple(values)))
 
 
-def _canonical_mapping(value: dict[str, Any]) -> dict[str, Any]:
-    return dict(canonicalize(value))
+def _canonical_mapping(value: dict[str, Any]) -> FrozenDict:
+    return FrozenDict(canonicalize(value))
+
+
+def _preserve_tuple(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(str(v) for v in values if str(v).strip())
 
 
 class ImmutableModel(BaseModel):
-    model_config = ConfigDict(frozen=True, validate_assignment=True)
+    model_config = ConfigDict(frozen=True, validate_assignment=True, arbitrary_types_allowed=True)
 
 
 class SignalAssessment(ImmutableModel):
@@ -81,11 +132,20 @@ class SignalAssessment(ImmutableModel):
     thesis: str | None = None
     evidence: tuple[str, ...] = ()
     risks: tuple[str, ...] = ()
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: FrozenDict = Field(default_factory=FrozenDict)
     evaluated_at: datetime | None = None
     availability: Literal["available", "unavailable", "excluded"] = "available"
     stale_evidence_warnings: tuple[str, ...] = ()
     point_in_time_warnings: tuple[str, ...] = ()
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def freeze_metadata(cls, value: Any) -> FrozenDict:
+        return _canonical_mapping(dict(value or {}))
+
+    @field_serializer("metadata")
+    def serialize_metadata(self, value: FrozenDict) -> dict[str, Any]:
+        return dict(canonicalize(value))
 
     @field_validator("signal_id")
     @classmethod
@@ -165,7 +225,7 @@ class CompanyResearchReport(ImmutableModel):
     report_id: str
     ticker: str = Field(min_length=1)
     company_name: str = Field(min_length=1)
-    universe_metadata: dict[str, Any]
+    universe_metadata: FrozenDict
     as_of: datetime
     universe_eligible: bool
     exclusion_reasons: tuple[str, ...] = ()
@@ -188,10 +248,19 @@ class CompanyResearchReport(ImmutableModel):
     unavailable_signals: tuple[str, ...] = ()
     stale_evidence_warnings: tuple[str, ...] = ()
     point_in_time_warnings: tuple[str, ...] = ()
-    provenance: dict[str, str]
-    source_timestamps: dict[str, datetime]
+    provenance: FrozenDict
+    source_timestamps: FrozenDict
     candidate_thesis: ResearchThesis
     canonical_content_hash: str
+
+    @field_validator("universe_metadata", "provenance", "source_timestamps", mode="before")
+    @classmethod
+    def freeze_report_mapping(cls, value: Any) -> FrozenDict:
+        return FrozenDict(dict(value or {}))
+
+    @field_serializer("universe_metadata", "provenance", "source_timestamps")
+    def serialize_report_mapping(self, value: FrozenDict) -> dict[str, Any]:
+        return dict(canonicalize(value))
 
     @field_validator(
         "report_id",
@@ -221,12 +290,8 @@ class CompanyResearchReport(ImmutableModel):
         object.__setattr__(self, "as_of", normalize_utc(self.as_of))
         list_fields = (
             "exclusion_reasons",
-            "supporting_evidence",
-            "contradictory_evidence",
-            "contextual_evidence",
             "key_risks",
             "catalysts",
-            "invalidation_conditions",
             "missing_evidence",
             "unavailable_signals",
             "stale_evidence_warnings",
@@ -234,6 +299,13 @@ class CompanyResearchReport(ImmutableModel):
         )
         for field in list_fields:
             object.__setattr__(self, field, _canonical_tuple(getattr(self, field)))
+        for field in (
+            "supporting_evidence",
+            "contradictory_evidence",
+            "contextual_evidence",
+            "invalidation_conditions",
+        ):
+            object.__setattr__(self, field, _preserve_tuple(getattr(self, field)))
         object.__setattr__(
             self,
             "signal_assessments",
@@ -250,13 +322,17 @@ class CompanyResearchReport(ImmutableModel):
         object.__setattr__(
             self,
             "provenance",
-            dict(sorted({str(k): str(v) for k, v in self.provenance.items()}.items())),
+            FrozenDict(dict(sorted({str(k): str(v) for k, v in self.provenance.items()}.items()))),
         )
-        object.__setattr__(
-            self,
-            "source_timestamps",
-            {k: normalize_utc(v) for k, v in sorted(self.source_timestamps.items())},
-        )
+        source_times: dict[str, datetime] = {}
+        for key, value in sorted(self.source_timestamps.items()):
+            parsed = (
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if isinstance(value, str)
+                else value
+            )
+            source_times[str(key)] = normalize_utc(parsed)
+        object.__setattr__(self, "source_timestamps", FrozenDict(source_times))
         return self
 
 
@@ -313,8 +389,15 @@ class ThesisRecord(ImmutableModel):
     @model_validator(mode="after")
     def normalize_record(self) -> ThesisRecord:
         object.__setattr__(self, "ticker", self.ticker.upper().strip())
+        object.__setattr__(
+            self,
+            "thesis",
+            self.thesis.model_copy(update={"ticker": self.thesis.ticker.upper().strip()}),
+        )
         object.__setattr__(self, "thesis_id", self.thesis_id.strip())
         object.__setattr__(self, "source_report_id", self.source_report_id.strip())
+        if not self.thesis_id or not self.source_report_id:
+            raise ValueError("thesis_id and source_report_id are required")
         for field in (
             "effective_at",
             "known_at",
@@ -326,8 +409,18 @@ class ThesisRecord(ImmutableModel):
         object.__setattr__(self, "revision_reason", self.revision_reason.strip())
         if not self.revision_reason:
             raise ValueError("revision reason is required")
+        if self.thesis.ticker != self.ticker:
+            raise ValueError("record ticker must match embedded thesis ticker")
+        if self.thesis.status != self.status:
+            raise ValueError("record status must match embedded thesis status")
+        if self.created_at > self.updated_at:
+            raise ValueError("created_at cannot be after updated_at")
+        if self.created_at > self.known_at:
+            raise ValueError("created_at cannot be after known_at")
         if self.known_at < self.effective_at:
             raise ValueError("known_at must be greater than or equal to effective_at")
+        if self.version == 1 and self.status != ThesisStatus.DRAFT:
+            raise ValueError("version 1 thesis status must be draft")
         if self.version == 1 and self.prior_version is not None:
             raise ValueError("version 1 cannot reference a prior version")
         if self.version > 1 and self.prior_version != self.version - 1:

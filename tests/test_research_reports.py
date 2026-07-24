@@ -131,12 +131,22 @@ def test_report_identity_uses_full_content_and_canonicalizes_unordered_fields() 
     assert changed.canonical_content_hash != one.canonical_content_hash
 
     reordered = one.model_dump(mode="python")
-    reordered["supporting_evidence"] = tuple(reversed(reordered["supporting_evidence"]))
     reordered["signal_assessments"] = tuple(reversed(reordered["signal_assessments"]))
     reordered["report_id"] = report_id_for_payload(reordered)
     reordered["canonical_content_hash"] = report_content_hash(reordered)
     assert (
         CompanyResearchReport.model_validate(reordered).model_dump_json() == one.model_dump_json()
+    )
+
+    reordered_ranked = one.model_dump(mode="python")
+    reordered_ranked["supporting_evidence"] = tuple(
+        reversed(reordered_ranked["supporting_evidence"])
+    )
+    reordered_ranked["report_id"] = report_id_for_payload(reordered_ranked)
+    reordered_ranked["canonical_content_hash"] = report_content_hash(reordered_ranked)
+    assert (
+        CompanyResearchReport.model_validate(reordered_ranked).supporting_evidence
+        != one.supporting_evidence
     )
 
 
@@ -152,7 +162,7 @@ def test_model_validation_and_input_mapping_defensive_copy() -> None:
     metadata = {"nested": {"items": ["b", "a"]}}
     assessment = SignalAssessment(signal_id="X", score=1, confidence=0.5, metadata=metadata)
     metadata["nested"]["items"].append("c")
-    assert assessment.metadata == {"nested": {"items": ["a", "b"]}}
+    assert assessment.metadata == {"nested": {"items": ("a", "b")}}
     with pytest.raises(ValidationError):
         SignalAssessment(signal_id="X", score=101, confidence=0.5)
     with pytest.raises(ValidationError):
@@ -221,3 +231,68 @@ def test_cli_persistence_requirements_and_json_list(tmp_path) -> None:
     )
     assert listed.exit_code == 0 and "source_report_id=" in listed.output
     assert json.loads(json_out.read_text())[0]["ticker"] == "ACME"
+
+
+def test_ranked_order_serializer_markdown_and_unknown_weight_diagnostic() -> None:
+    from smct_research.research.render import serialize_report_json
+
+    report = _report("ACME")
+    assert report.missing_evidence and "M1: composite weight unavailable" in report.missing_evidence
+    assert all(not item.startswith("M1:") for item in report.supporting_evidence)
+    assert report.contextual_evidence
+    support = list(report.supporting_evidence)
+    assert support.index("A1: EV/Sales is 62% below its three-year median.") < support.index(
+        "E2: Estimated disclosed purchase value: $500,000."
+    )
+    rendered_json = serialize_report_json(report)
+    assert rendered_json.endswith("\n")
+    assert rendered_json.index("A1: EV/Sales") < rendered_json.index("E2: Estimated")
+    markdown = render_markdown(report)
+    assert markdown.index("A1: EV/Sales") < markdown.index("E2: Estimated")
+    assert "M1: composite weight unavailable" in markdown
+
+
+def test_model_owned_mappings_are_immutable_and_hash_stable() -> None:
+    from smct_research.research.models import report_content_hash
+
+    report = _report("ACME")
+    before = report_content_hash(report)
+    with pytest.raises(TypeError):
+        report.provenance["source"] = "changed"
+    with pytest.raises(TypeError):
+        report.universe_metadata["sector"] = "changed"
+    with pytest.raises(TypeError):
+        report.source_timestamps["financials"] = report.as_of
+    with pytest.raises(TypeError):
+        report.signal_assessments[0].metadata["new"] = "changed"
+    assert report_content_hash(report) == before
+
+
+def test_markdown_escaping_special_content() -> None:
+    from smct_research.research.models import SignalAssessment
+
+    data = _report("ACME").model_dump(mode="python")
+    assessment = SignalAssessment.model_validate(data["signal_assessments"][0])
+    data["signal_assessments"] = (
+        assessment.model_copy(
+            update={
+                "signal_name": "Pipe | * _ ` [ ] < > #",
+                "thesis": "Thesis | * _ ` [ ] < > #\nnext",
+                "evidence": ("Evidence | * _ ` [ ] < > #\nnext",),
+                "risks": ("Risk | * _ ` [ ] < > #\nnext",),
+            }
+        ),
+    ) + data["signal_assessments"][1:]
+    from smct_research.research.models import (
+        CompanyResearchReport,
+        report_content_hash,
+        report_id_for_payload,
+    )
+
+    data["provenance"] = {"prov|*`#": "value|*`#"}
+    data["report_id"] = report_id_for_payload(data)
+    data["canonical_content_hash"] = report_content_hash(data)
+    markdown = render_markdown(CompanyResearchReport.model_validate(data))
+    assert "Pipe \\| \\* \\_ \\` \\[ \\] \\< \\> \\#" in markdown
+    assert markdown.endswith("\n")
+    assert "### Source timestamps" in markdown

@@ -13,6 +13,7 @@ from smct_research.core.models import (
 from smct_research.core.signal import ResearchSignal
 from smct_research.research.models import (
     CompanyResearchReport,
+    FrozenDict,
     SignalAssessment,
     ValuationSummary,
     report_content_hash,
@@ -60,7 +61,7 @@ class ResearchReportBuilder:
                         thesis=result.thesis,
                         evidence=tuple(result.evidence),
                         risks=tuple(result.risks),
-                        metadata=dict(sorted(result.metadata.items())),
+                        metadata=FrozenDict(dict(sorted(result.metadata.items()))),
                         evaluated_at=result.evaluated_at,
                         stale_evidence_warnings=tuple(ranked.stale_evidence_warnings),
                         point_in_time_warnings=tuple(ranked.point_in_time_eligibility_warnings),
@@ -76,12 +77,14 @@ class ResearchReportBuilder:
                     )
                 )
         available = [a for a in assessments if a.availability == "available"]
+        unknown_weight = [a for a in available if a.weighted_contribution is None]
+        rankable = [a for a in available if a.weighted_contribution is not None]
         positives = sorted(
-            [a for a in available if a.direction == SignalDirection.POSITIVE],
+            [a for a in rankable if a.direction == SignalDirection.POSITIVE],
             key=lambda a: (-(a.weighted_contribution or 0), a.signal_id),
         )
         negatives = sorted(
-            [a for a in available if a.direction == SignalDirection.NEGATIVE],
+            [a for a in rankable if a.direction == SignalDirection.NEGATIVE],
             key=lambda a: ((a.weighted_contribution or 0), a.signal_id),
         )
         support = tuple(f"{a.signal_id}: {e}" for a in positives for e in a.evidence)
@@ -100,6 +103,7 @@ class ResearchReportBuilder:
         missing = _sorted_unique(
             [f"{sid}: unavailable" for sid in ranked.unavailable_signals]
             + ranked.signal_diagnostics
+            + [f"{a.signal_id}: composite weight unavailable" for a in unknown_weight]
         )
         valuation = self._valuation(snapshot, available)
         invalidations = self._invalidations(positives, valuation)
