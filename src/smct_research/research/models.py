@@ -1,50 +1,78 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from enum import StrEnum
 from math import isfinite
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
 
-from smct_research.core.models import normalize_utc
+from smct_research.core.models import SignalDirection, normalize_utc
 
 
-class FrozenDict(dict[str, Any]):
-    """Small immutable dict that remains JSON-serializable through Pydantic."""
+class FrozenDict(Mapping[str, Any]):
+    """Immutable mapping backed by a private, recursively frozen dictionary."""
 
     def __init__(self, value: Mapping[str, Any] | None = None, /, **kwargs: Any) -> None:
         data: dict[str, Any] = {}
         if value is not None:
             data.update(value)
         data.update(kwargs)
-        super().__init__((key, _freeze(value)) for key, value in data.items())
+        self._data = {key: _freeze(item) for key, item in data.items()}
 
-    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
-        raise TypeError("FrozenDict is immutable")
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
 
-    def __setitem__(self, _key: str, _value: Any) -> None:
-        self._immutable()
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
 
-    def __delitem__(self, _key: str) -> None:
-        self._immutable()
+    def __len__(self) -> int:
+        return len(self._data)
 
-    def clear(self) -> None:
-        self._immutable()
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Mapping):
+            return False
+        return dict(self.items()) == dict(other.items())
 
-    def pop(self, _key: str, _default: Any = None) -> Any:
-        self._immutable()
+    def __repr__(self) -> str:
+        return repr(self._data)
 
-    def popitem(self) -> tuple[str, Any]:
-        self._immutable()
-        raise AssertionError("unreachable")
+    def __or__(self, other: Mapping[str, Any]) -> dict[str, Any]:
+        merged = dict(self._data)
+        merged.update(other)
+        return merged
 
-    def setdefault(self, _key: str, _default: Any = None) -> Any:
-        self._immutable()
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source_type: Any, _handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls._validate,
+            core_schema.dict_schema(core_schema.str_schema(), core_schema.any_schema()),
+            serialization=core_schema.plain_serializer_function_ser_schema(_as_serializable),
+        )
 
-    def update(self, *_args: Any, **_kwargs: Any) -> None:
-        self._immutable()
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, _core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return handler(core_schema.dict_schema(core_schema.str_schema(), core_schema.any_schema()))
+
+    @classmethod
+    def _validate(cls, value: Mapping[str, Any]) -> FrozenDict:
+        return value if isinstance(value, FrozenDict) else cls(value)
 
 
 def _freeze(value: Any) -> Any:
@@ -57,18 +85,36 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _as_serializable(value: Any) -> Any:
+    if isinstance(value, FrozenDict):
+        return {key: _as_serializable(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_as_serializable(item) for item in value)
+    return value
+
+
 def _freeze_mapping(value: Mapping[str, Any] | None) -> FrozenDict | None:
     return None if value is None else FrozenDict(value)
 
 
 def _freeze_collection(value: Iterable[Any] | None) -> tuple[Any, ...] | None:
-    return None if value is None else tuple(_freeze(item) for item in value)
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        raise ValueError("collection fields must be lists or tuples, not strings")
+    return tuple(_freeze(item) for item in value)
 
 
 def _finite(value: float | int | None, field_name: str) -> float | int | None:
     if value is not None and not isfinite(float(value)):
         raise ValueError(f"{field_name} must be finite")
     return value
+
+
+def _normalize_datetime(value: datetime | str) -> datetime:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return normalize_utc(value)
 
 
 class SignalAvailability(StrEnum):
@@ -86,7 +132,7 @@ class SignalAssessment(ImmutableModel):
     signal_name: str | None = None
     score: float | None = Field(default=None, ge=-100, le=100)
     confidence: float | None = Field(default=None, ge=0, le=1)
-    direction: str | None = None
+    direction: SignalDirection | None = None
     weighted_contribution: float | None = None
     thesis: str | None = None
     evidence: tuple[str, ...] | None = None
@@ -113,7 +159,7 @@ class SignalAssessment(ImmutableModel):
     @field_validator("evaluated_at")
     @classmethod
     def normalize_evaluated_at(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else normalize_utc(value)
+        return None if value is None else _normalize_datetime(value)
 
     @field_validator(
         "evidence", "risks", "stale_evidence_warnings", "point_in_time_warnings", mode="before"
@@ -126,6 +172,10 @@ class SignalAssessment(ImmutableModel):
     @classmethod
     def freeze_metadata(cls, value: Mapping[str, Any] | None) -> FrozenDict | None:
         return _freeze_mapping(value)
+
+    @field_serializer("metadata")
+    def serialize_metadata(self, value: FrozenDict | None) -> dict[str, Any] | None:
+        return None if value is None else _as_serializable(value)
 
 
 class ValuationSummary(ImmutableModel):
@@ -162,7 +212,7 @@ class ValuationSummary(ImmutableModel):
 
 
 class CompanyIdentity(ImmutableModel):
-    ticker: str
+    ticker: str = Field(min_length=1, max_length=12)
     name: str
     market_cap_usd: float | None = Field(default=None, ge=0)
     sector: str | None = None
@@ -258,7 +308,15 @@ class CompanyResearchReport(ImmutableModel):
     def freeze_source_timestamps(cls, value: Mapping[str, datetime] | None) -> FrozenDict:
         if value is None:
             return FrozenDict()
-        return FrozenDict({key: normalize_utc(timestamp) for key, timestamp in value.items()})
+        return FrozenDict({key: _normalize_datetime(timestamp) for key, timestamp in value.items()})
+
+    @field_serializer("provenance")
+    def serialize_provenance(self, value: FrozenDict) -> dict[str, Any]:
+        return _as_serializable(value)
+
+    @field_serializer("source_timestamps")
+    def serialize_source_timestamps(self, value: FrozenDict) -> dict[str, datetime]:
+        return dict(value.items())
 
     @model_validator(mode="after")
     def validate_report(self) -> CompanyResearchReport:
@@ -266,6 +324,8 @@ class CompanyResearchReport(ImmutableModel):
         if len(signal_ids) != len(set(signal_ids)):
             raise ValueError("signal_assessments must not contain duplicate signal IDs")
         unavailable = [signal_id.strip() for signal_id in self.unavailable_signals]
+        if any(not signal_id for signal_id in unavailable):
+            raise ValueError("unavailable_signals must not contain blank signal IDs")
         if len(unavailable) != len(set(unavailable)):
             raise ValueError("unavailable_signals must not contain duplicate signal IDs")
         if not self.universe_eligible and not self.exclusion_reasons:
