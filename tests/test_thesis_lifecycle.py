@@ -323,3 +323,89 @@ def test_multiple_series_ambiguity_and_explicit_resolution(tmp_path) -> None:
         )
     finally:
         store.close()
+
+
+def test_thesis_hash_preserves_ordered_evidence() -> None:
+    from smct_research.research.thesis import thesis_record_hash
+
+    record = create_initial_thesis_record(_report())
+    reversed_record = record.model_copy(
+        update={
+            "thesis": record.thesis.model_copy(
+                update={"supporting_evidence": list(reversed(record.thesis.supporting_evidence))}
+            )
+        }
+    )
+    assert thesis_record_hash(reversed_record) != record.canonical_content_hash
+
+
+def test_persistence_revalidates_invalid_model_copy_records(tmp_path) -> None:
+    from smct_research.research.models import report_content_hash
+    from smct_research.research.thesis import thesis_record_hash
+
+    report = _report()
+    store = LocalAnalyticalStore(tmp_path / "r.duckdb")
+    try:
+        invalid_report = report.model_copy(
+            update={
+                "signal_assessments": (report.signal_assessments[0], report.signal_assessments[0])
+            }
+        )
+        invalid_report = invalid_report.model_copy(
+            update={"canonical_content_hash": report_content_hash(invalid_report)}
+        )
+        with pytest.raises(ValueError):
+            store.store_research_report(invalid_report)
+        store.store_research_report(report)
+        record = create_initial_thesis_record(report)
+        invalid_record = record.model_copy(update={"ticker": "NOPE"})
+        invalid_record = invalid_record.model_copy(
+            update={"canonical_content_hash": thesis_record_hash(invalid_record)}
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(invalid_record)
+        invalid_status = record.model_copy(update={"status": ThesisStatus.ACTIVE})
+        invalid_status = invalid_status.model_copy(
+            update={"canonical_content_hash": thesis_record_hash(invalid_status)}
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(invalid_status)
+        invalid_time = record.model_copy(update={"created_at": datetime(2026, 7, 18, tzinfo=UTC)})
+        invalid_time = invalid_time.model_copy(
+            update={"canonical_content_hash": thesis_record_hash(invalid_time)}
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(invalid_time)
+    finally:
+        store.close()
+
+
+def test_thesis_list_json_preserves_chronological_order(tmp_path) -> None:
+    from typer.testing import CliRunner
+
+    from smct_research.cli import app
+
+    db = tmp_path / "r.duckdb"
+    store = LocalAnalyticalStore(db)
+    try:
+        report = _report()
+        store.store_research_report(report)
+        first = create_initial_thesis_record(report)
+        store.store_thesis_record(first)
+        active = transition_thesis(
+            first,
+            ThesisStatus.ACTIVE,
+            "review",
+            datetime(2026, 7, 18, tzinfo=UTC),
+            datetime(2026, 7, 18, tzinfo=UTC),
+        )
+        store.store_thesis_record(active)
+    finally:
+        store.close()
+    out = tmp_path / "history.json"
+    result = CliRunner().invoke(
+        app, ["thesis-list", str(db), "--ticker", "ACME", "--output-json", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    payload = __import__("json").loads(out.read_text())
+    assert [row["version"] for row in payload] == [1, 2]

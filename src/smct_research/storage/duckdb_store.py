@@ -367,6 +367,7 @@ def _ensure_research_tables(self: LocalAnalyticalStore) -> None:
 
 def store_research_report(self: LocalAnalyticalStore, report: CompanyResearchReport) -> None:
     _ensure_research_tables(self)
+    report = CompanyResearchReport.model_validate(report.model_dump(mode="python"))
     validate_report_identity(report)
     payload = report.model_dump_json()
     existing = self.connection.execute(
@@ -469,6 +470,7 @@ def _validate_thesis_for_store(self: LocalAnalyticalStore, record: ThesisRecord)
 
 def store_thesis_record(self: LocalAnalyticalStore, record: ThesisRecord) -> None:
     _ensure_research_tables(self)
+    record = ThesisRecord.model_validate(record.model_dump(mode="python"))
     payload = record.model_dump_json()
     existing = self.connection.execute(
         "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=? AND version=?",

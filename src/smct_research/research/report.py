@@ -31,6 +31,35 @@ def _sorted_unique(items: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted(dict.fromkeys(str(i) for i in items if str(i).strip())))
 
 
+def ranked_signal_evidence(
+    assessments: list[SignalAssessment], direction: SignalDirection
+) -> tuple[str, ...]:
+    """Rank evidence by contribution, signal id, then evidence text."""
+    rows: list[tuple[float, str, str]] = []
+    for assessment in assessments:
+        if assessment.direction != direction or assessment.weighted_contribution is None:
+            continue
+        for evidence in assessment.evidence:
+            rows.append((assessment.weighted_contribution, assessment.signal_id, evidence))
+    if direction == SignalDirection.POSITIVE:
+        rows.sort(key=lambda row: (-row[0], row[1], row[2]))
+    elif direction == SignalDirection.NEGATIVE:
+        rows.sort(key=lambda row: (row[0], row[1], row[2]))
+    else:
+        rows.sort(key=lambda row: (row[1], row[2]))
+    return tuple(f"{signal_id}: {evidence}" for _, signal_id, evidence in rows)
+
+
+def contextual_signal_evidence(assessments: list[SignalAssessment]) -> tuple[str, ...]:
+    rows = [
+        (assessment.signal_id, evidence)
+        for assessment in assessments
+        if assessment.direction == SignalDirection.NEUTRAL
+        for evidence in assessment.evidence
+    ]
+    return tuple(f"{signal_id}: {evidence}" for signal_id, evidence in sorted(rows))
+
+
 class ResearchReportBuilder:
     def __init__(self, scorer: CompositeResearchScorer, signals: list[ResearchSignal]) -> None:
         self.scorer = scorer
@@ -87,14 +116,9 @@ class ResearchReportBuilder:
             [a for a in rankable if a.direction == SignalDirection.NEGATIVE],
             key=lambda a: ((a.weighted_contribution or 0), a.signal_id),
         )
-        support = tuple(f"{a.signal_id}: {e}" for a in positives for e in a.evidence)
-        contra = tuple(f"{a.signal_id}: {e}" for a in negatives for e in a.evidence)
-        context = tuple(
-            f"{a.signal_id}: {e}"
-            for a in available
-            if a.direction == SignalDirection.NEUTRAL
-            for e in a.evidence
-        )
+        support = ranked_signal_evidence(rankable, SignalDirection.POSITIVE)
+        contra = ranked_signal_evidence(rankable, SignalDirection.NEGATIVE)
+        context = contextual_signal_evidence(available)
         risks = _sorted_unique(
             [f"{a.signal_id}: {r}" for a in available for r in a.risks]
             + list(ranked.exclusion_reasons)

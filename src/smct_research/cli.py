@@ -22,8 +22,12 @@ from smct_research.estimates.models import EstimateBasis, EstimateMetric, Estima
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
-from smct_research.research.models import canonical_json
-from smct_research.research.render import render_markdown, serialize_report_json
+from smct_research.research.render import (
+    render_markdown,
+    serialize_report_json,
+    serialize_thesis_history_json,
+    serialize_thesis_record_json,
+)
 from smct_research.research.report import ResearchReportBuilder
 from smct_research.research.thesis import create_initial_thesis_record, transition_thesis
 from smct_research.scoring.composite import CompositeResearchScorer
@@ -480,7 +484,7 @@ def thesis_list(
         raise typer.BadParameter(str(error)) from error
     payload = [row.model_dump(mode="python") for row in rows]
     if output_json:
-        output_json.write_text(canonical_json(payload) + "\n")
+        output_json.write_text(serialize_thesis_history_json(payload))
     for row in rows:
         typer.echo(
             " ".join(
@@ -531,7 +535,7 @@ def thesis_show(
             raise ValueError("A thesis exists but is not visible at the requested as-of timestamp")
     except (OSError, ValueError, RuntimeError) as error:
         raise typer.BadParameter(str(error)) from error
-    typer.echo(canonical_json(row.model_dump(mode="python")))
+    typer.echo(serialize_thesis_record_json(row.model_dump(mode="python")).rstrip("\n"))
 
 
 @app.command("thesis-transition")
@@ -569,7 +573,7 @@ def thesis_transition(
             store.close()
     except (OSError, ValueError, RuntimeError) as error:
         raise typer.BadParameter(str(error)) from error
-    typer.echo(canonical_json(new.model_dump(mode="python")))
+    typer.echo(serialize_thesis_record_json(new.model_dump(mode="python")).rstrip("\n"))
 
 
 if __name__ == "__main__":

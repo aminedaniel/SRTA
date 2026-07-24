@@ -8,11 +8,11 @@ The report builder reuses the universe loader, feature snapshots, registered sig
 
 ## Canonical report identity and hashes
 
-A report's `report_id` and `canonical_content_hash` are derived from one canonical payload helper that excludes only `report_id` and `canonical_content_hash` themselves. The payload includes schema version, company identity, company name, universe metadata, `as_of`, eligibility, exclusion reasons, rank, score, confidence, feature completeness, narratives, signal assessments, supporting/contradictory/contextual evidence, risks, catalysts, invalidation conditions, valuation summary, missing evidence, unavailable signals, stale and point-in-time warnings, provenance, source timestamps, and the candidate thesis. Meaningful changes to evidence, risks, provenance, timestamps, valuation, catalysts, or narratives change both the content hash and report ID.
+A report's `report_id` and `canonical_content_hash` are derived from one order-aware `report_identity_payload` helper that excludes only `report_id` and `canonical_content_hash` themselves. The payload includes schema version, company identity, company name, universe metadata, `as_of`, eligibility, exclusion reasons, rank, score, confidence, feature completeness, narratives, signal assessments, supporting/contradictory/contextual evidence, risks, catalysts, invalidation conditions, valuation summary, missing evidence, unavailable signals, stale and point-in-time warnings, provenance, source timestamps, and the candidate thesis. Meaningful changes to evidence, risks, provenance, timestamps, valuation, catalysts, or narratives change both the content hash and report ID.
 
 ## Canonical versus ranked ordering
 
-Semantically unordered fields are recursively canonicalized: dictionaries sort by key, nested metadata is canonicalized, unordered lists are sorted without collapsing type distinctions, timestamps are UTC normalized, and enums serialize to values. Signal assessments are sorted by `signal_id`. Supporting evidence, contradictory evidence, contextual evidence, and invalidation conditions preserve builder order; positive and negative evidence are ranked by weighted contribution, then signal ID, then stable evidence text. The report-specific JSON serializer preserves those ranked lists while sorting mapping keys and ending with a single newline. Catalysts are canonically sorted unless a future workflow explicitly ranks them.
+Semantically unordered fields are recursively canonicalized: dictionaries sort by key, nested metadata is canonicalized, unordered lists are sorted without collapsing type distinctions, timestamps are UTC normalized, and enums serialize to values. Signal assessments are sorted by `signal_id`. Supporting evidence, contradictory evidence, contextual evidence, and invalidation conditions preserve builder order; positive and negative evidence are ranked by weighted contribution, then signal ID, then stable evidence text. The report-specific JSON serializer and report identity helper preserve those ranked lists while sorting mapping keys and ending serialized JSON with a single newline. Catalysts are canonically sorted unless a future workflow explicitly ranks them.
 
 ## Report schema
 
@@ -38,7 +38,7 @@ Missing snapshots, unavailable signals, signal diagnostics, missing valuation fi
 
 ## Thesis lifecycle
 
-Thesis versions are append-only `ThesisRecord` rows containing stable thesis ID, version, ticker, `ResearchThesis` payload, status, effective timestamp, known-at timestamp, source report ID and `as_of`, revision reason, prior version, content hash, and created/updated timestamps.
+Thesis versions are append-only `ThesisRecord` rows containing stable thesis ID, version, ticker, `ResearchThesis` payload, status, effective timestamp, known-at timestamp, source report ID and `as_of`, revision reason, prior version, content hash, and created/updated timestamps. Thesis hashes use a thesis-specific payload that preserves the order of thesis supporting evidence, key risks, and invalidation conditions while sorting mappings and normalizing timestamps.
 
 Allowed transitions are:
 
@@ -59,7 +59,7 @@ Every thesis version references a persisted report. Persistence verifies that th
 
 ## Multiple thesis series
 
-A ticker may start a new thesis series only after every existing series for that ticker is terminal (`invalidated` or `fully_priced`). A ticker may have multiple thesis series after terminal completion. Ticker-only latest and as-of lookups use chronological ordering by `known_at`, `effective_at`, version, and thesis ID as a deterministic tie-breaker. If a query remains ambiguous, CLI users must pass `--thesis-id`. `thesis-list` always prints thesis IDs so separate series can be identified.
+A ticker may start a new thesis series only after every existing series for that ticker is terminal (`invalidated` or `fully_priced`). A ticker may have multiple thesis series after terminal completion. Ticker-only latest and as-of lookups use chronological ordering by `known_at`, `effective_at`, version, and thesis ID as a deterministic tie-breaker. If a query remains ambiguous, CLI users must pass `--thesis-id`. `thesis-list` always prints thesis IDs so separate series can be identified, and its JSON output preserves chronological history order while sorting keys inside each row.
 
 ## CLI examples and controlled errors
 

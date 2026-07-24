@@ -296,3 +296,52 @@ def test_markdown_escaping_special_content() -> None:
     assert "Pipe \\| \\* \\_ \\` \\[ \\] \\< \\> \\#" in markdown
     assert markdown.endswith("\n")
     assert "### Source timestamps" in markdown
+
+
+def test_report_identity_preserves_ranked_order_but_ignores_unordered_order() -> None:
+    from smct_research.research.models import report_content_hash, report_id_for_payload
+
+    report = _report("ACME")
+    reversed_ranked = report.model_dump(mode="python")
+    reversed_ranked["supporting_evidence"] = tuple(reversed(report.supporting_evidence))
+    assert report_id_for_payload(reversed_ranked) != report.report_id
+    assert report_content_hash(reversed_ranked) != report.canonical_content_hash
+
+    reordered_unordered = report.model_dump(mode="python")
+    reordered_unordered["missing_evidence"] = tuple(reversed(report.missing_evidence))
+    reordered_unordered["provenance"] = dict(reversed(list(report.provenance.items())))
+    assert report_id_for_payload(reordered_unordered) == report.report_id
+    assert report_content_hash(reordered_unordered) == report.canonical_content_hash
+
+
+def test_fixture_files_are_generated_by_public_serializers() -> None:
+    from pathlib import Path
+
+    from smct_research.research.render import serialize_report_json
+
+    for ticker, stem in (("ACME", "acme"), ("MISS", "miss")):
+        report = _report(ticker)
+        assert Path(f"examples/research/{stem}-report.json").read_text() == serialize_report_json(
+            report
+        )
+        assert Path(f"examples/research/{stem}-report.md").read_text() == render_markdown(report)
+
+
+def test_frozendict_blocks_all_common_mutations() -> None:
+    from smct_research.research.models import FrozenDict
+
+    value = FrozenDict({"nested": {"items": ["a"]}, "plain": "x"})
+    for mutator in (
+        lambda: value.setdefault("new", "v"),
+        lambda: value.update({"new": "v"}),
+        lambda: value.pop("plain"),
+        lambda: value.popitem(),
+        lambda: value.clear(),
+        lambda: value.__setitem__("new", "v"),
+        lambda: value.__delitem__("plain"),
+        lambda: value.__ior__({"new": "v"}),
+        lambda: value["nested"].__setitem__("new", "v"),
+    ):
+        with pytest.raises(TypeError):
+            mutator()
+    assert value["nested"]["items"] == ("a",)

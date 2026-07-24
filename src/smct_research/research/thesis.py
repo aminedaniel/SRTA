@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel
 
 from smct_research.core.models import ThesisStatus, normalize_utc
-from smct_research.research.models import CompanyResearchReport, ThesisRecord, content_hash
+from smct_research.research.models import CompanyResearchReport, ThesisRecord
 
 TERMINAL_STATUSES = {ThesisStatus.INVALIDATED, ThesisStatus.FULLY_PRICED}
 ALLOWED_TRANSITIONS: dict[ThesisStatus, set[ThesisStatus]] = {
@@ -37,6 +42,39 @@ def stable_thesis_id(ticker: str, report_id: str, title: str) -> str:
     return "thesis_" + hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
+THESIS_ORDERED_LIST_PATHS = {
+    ("thesis", "supporting_evidence"),
+    ("thesis", "key_risks"),
+    ("thesis", "invalidation_conditions"),
+}
+
+
+def _thesis_canonicalize(value: Any, path: tuple[str, ...] = ()) -> Any:
+    if isinstance(value, BaseModel):
+        return _thesis_canonicalize(value.model_dump(mode="python"), path)
+    if isinstance(value, datetime):
+        return normalize_utc(value).isoformat().replace("+00:00", "Z")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {
+            str(key): _thesis_canonicalize(item, (*path, str(key)))
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [_thesis_canonicalize(item, path) for item in value]
+        if path in THESIS_ORDERED_LIST_PATHS:
+            return items
+        return sorted(
+            items,
+            key=lambda item: (
+                type(item).__name__,
+                json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            ),
+        )
+    return value
+
+
 def thesis_record_payload(record_or_data: ThesisRecord | dict[str, object]) -> dict[str, object]:
     data = (
         record_or_data.model_dump(mode="python")
@@ -44,11 +82,14 @@ def thesis_record_payload(record_or_data: ThesisRecord | dict[str, object]) -> d
         else dict(record_or_data)
     )
     data.pop("canonical_content_hash", None)
-    return data
+    return _thesis_canonicalize(data)
 
 
 def thesis_record_hash(record_or_data: ThesisRecord | dict[str, object]) -> str:
-    return content_hash(thesis_record_payload(record_or_data))
+    payload = thesis_record_payload(record_or_data)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def _record_hash(data: dict[str, object]) -> str:

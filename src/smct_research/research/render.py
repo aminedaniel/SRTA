@@ -50,6 +50,22 @@ def serialize_report_json(report: CompanyResearchReport) -> str:
     )
 
 
+def serialize_ordered_json(value: Any) -> str:
+    """Serialize model/list payloads with model order preserved and keys sorted."""
+    return (
+        json.dumps(_json_ready(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    )
+
+
+def serialize_thesis_record_json(value: Any) -> str:
+    return serialize_ordered_json(value)
+
+
+def serialize_thesis_history_json(values: list[Any]) -> str:
+    return serialize_ordered_json(values)
+
+
 def render_markdown(report: CompanyResearchReport) -> str:
     lines: list[str] = [f"# {report.ticker} — Company Research Report", ""]
     lines += [

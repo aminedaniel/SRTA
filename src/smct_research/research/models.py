@@ -51,6 +51,9 @@ class FrozenDict(dict[str, Any]):
     def update(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError("FrozenDict is immutable")
 
+    def __ior__(self, other: Any) -> FrozenDict:  # type: ignore[override,misc]
+        raise TypeError("FrozenDict is immutable")
+
 
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, FrozenDict):
@@ -339,7 +342,46 @@ class CompanyResearchReport(ImmutableModel):
 REPORT_ID_PREFIX = "report_"
 
 
-def report_canonical_payload(
+REPORT_ORDERED_LIST_PATHS = {
+    ("supporting_evidence",),
+    ("contradictory_evidence",),
+    ("contextual_evidence",),
+    ("invalidation_conditions",),
+    ("candidate_thesis", "supporting_evidence"),
+    ("candidate_thesis", "key_risks"),
+    ("candidate_thesis", "invalidation_conditions"),
+}
+
+
+def _identity_canonicalize(value: Any, path: tuple[str, ...] = ()) -> Any:
+    if isinstance(value, BaseModel):
+        return _identity_canonicalize(value.model_dump(mode="python"), path)
+    if isinstance(value, datetime):
+        return normalize_utc(value).isoformat().replace("+00:00", "Z")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {
+            str(key): _identity_canonicalize(item, (*path, str(key)))
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [_identity_canonicalize(item, path) for item in value]
+        if path in REPORT_ORDERED_LIST_PATHS:
+            return items
+        return sorted(
+            items,
+            key=lambda item: (
+                type(item).__name__,
+                json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            ),
+        )
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("numeric values must be finite")
+    return value
+
+
+def report_identity_payload(
     report_or_data: CompanyResearchReport | dict[str, Any],
 ) -> dict[str, Any]:
     data = (
@@ -349,11 +391,20 @@ def report_canonical_payload(
     )
     data.pop("report_id", None)
     data.pop("canonical_content_hash", None)
-    return canonicalize(data)
+    return _identity_canonicalize(data)
+
+
+def report_canonical_payload(
+    report_or_data: CompanyResearchReport | dict[str, Any],
+) -> dict[str, Any]:
+    return report_identity_payload(report_or_data)
 
 
 def report_content_hash(report_or_data: CompanyResearchReport | dict[str, Any]) -> str:
-    return content_hash(report_canonical_payload(report_or_data))
+    payload = report_identity_payload(report_or_data)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def report_id_for_payload(report_or_data: CompanyResearchReport | dict[str, Any]) -> str:
