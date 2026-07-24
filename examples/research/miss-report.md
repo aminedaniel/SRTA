@@ -1,7 +1,7 @@
 # MISS — Company Research Report
 
 ## Research snapshot
-- Report ID: report_840d7ed4bd3a33733be21777
+- Report ID: report_136adf37119c82c6c0058d2f
 - As of: 2026-07-17T00:00:00+00:00
 - Company: Missing Evidence Inc.
 - Universe eligible: True
@@ -59,6 +59,9 @@ Evidence is incomplete and does not yet support a differentiated thesis.
 ## Catalysts
 - No evidence-backed catalysts are currently recorded.
 
+## Contextual evidence
+- Missing
+
 ## Key risks
 - Missing
 
@@ -102,3 +105,5 @@ Evidence is incomplete and does not yet support a differentiated thesis.
 
 ## Provenance
 - financials: offline fixture
+### Source timestamps
+- financials: 2026-06-30T00:00:00+00:00

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 
-from smct_research.core.models import ResearchThesis, ThesisStatus, normalize_utc
+from smct_research.core.models import ThesisStatus, normalize_utc
 from smct_research.research.models import CompanyResearchReport, ThesisRecord, content_hash
 
 TERMINAL_STATUSES = {ThesisStatus.INVALIDATED, ThesisStatus.FULLY_PRICED}
@@ -37,15 +37,27 @@ def stable_thesis_id(ticker: str, report_id: str, title: str) -> str:
     return "thesis_" + hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
-def _record_hash(thesis: ResearchThesis, status: ThesisStatus, version: int, reason: str) -> str:
-    return content_hash(
-        {
-            "thesis": thesis.model_dump(mode="json"),
-            "status": status.value,
-            "version": version,
-            "revision_reason": reason,
-        }
+def thesis_record_payload(record_or_data: ThesisRecord | dict[str, object]) -> dict[str, object]:
+    data = (
+        record_or_data.model_dump(mode="python")
+        if isinstance(record_or_data, ThesisRecord)
+        else dict(record_or_data)
     )
+    data.pop("canonical_content_hash", None)
+    return data
+
+
+def thesis_record_hash(record_or_data: ThesisRecord | dict[str, object]) -> str:
+    return content_hash(thesis_record_payload(record_or_data))
+
+
+def _record_hash(data: dict[str, object]) -> str:
+    return thesis_record_hash(data)
+
+
+def validate_thesis_record_hash(record: ThesisRecord) -> None:
+    if record.canonical_content_hash != thesis_record_hash(record):
+        raise ValueError("thesis record content hash mismatch")
 
 
 def create_initial_thesis_record(
@@ -56,22 +68,24 @@ def create_initial_thesis_record(
         update={"status": ThesisStatus.DRAFT, "created_at": now, "updated_at": now}
     )
     reason = "Initial draft thesis created from deterministic company research report."
-    return ThesisRecord(
-        thesis_id=stable_thesis_id(report.ticker, report.report_id, thesis.title),
-        version=1,
-        ticker=report.ticker,
-        thesis=thesis,
-        status=ThesisStatus.DRAFT,
-        effective_at=report.as_of,
-        known_at=report.as_of,
-        source_report_id=report.report_id,
-        source_report_as_of=report.as_of,
-        revision_reason=reason,
-        prior_version=None,
-        canonical_content_hash=_record_hash(thesis, ThesisStatus.DRAFT, 1, reason),
-        created_at=now,
-        updated_at=now,
-    )
+    data: dict[str, object] = {
+        "schema_version": "thesis_record.v1",
+        "thesis_id": stable_thesis_id(report.ticker, report.report_id, thesis.title),
+        "version": 1,
+        "ticker": report.ticker,
+        "thesis": thesis,
+        "status": ThesisStatus.DRAFT,
+        "effective_at": report.as_of,
+        "known_at": report.as_of,
+        "source_report_id": report.report_id,
+        "source_report_as_of": report.as_of,
+        "revision_reason": reason,
+        "prior_version": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    data["canonical_content_hash"] = _record_hash(data)
+    return ThesisRecord.model_validate(data)
 
 
 def transition_thesis(
@@ -89,21 +103,29 @@ def transition_thesis(
         raise ValueError(f"invalid thesis transition: {record.status.value} -> {status.value}")
     eff = normalize_utc(effective_at)
     known = normalize_utc(known_at)
+    if eff < record.effective_at:
+        raise ValueError("effective_at cannot move backward")
+    if known < record.known_at:
+        raise ValueError("known_at cannot move backward")
+    if known < eff:
+        raise ValueError("known_at must be greater than or equal to effective_at")
     thesis = record.thesis.model_copy(update={"status": status, "updated_at": known})
     version = record.version + 1
-    return ThesisRecord(
-        thesis_id=record.thesis_id,
-        version=version,
-        ticker=record.ticker,
-        thesis=thesis,
-        status=status,
-        effective_at=eff,
-        known_at=known,
-        source_report_id=record.source_report_id,
-        source_report_as_of=record.source_report_as_of,
-        revision_reason=reason,
-        prior_version=record.version,
-        canonical_content_hash=_record_hash(thesis, status, version, reason),
-        created_at=record.created_at,
-        updated_at=known,
-    )
+    data: dict[str, object] = {
+        "schema_version": "thesis_record.v1",
+        "thesis_id": record.thesis_id,
+        "version": version,
+        "ticker": record.ticker,
+        "thesis": thesis,
+        "status": status,
+        "effective_at": eff,
+        "known_at": known,
+        "source_report_id": record.source_report_id,
+        "source_report_as_of": record.source_report_as_of,
+        "revision_reason": reason,
+        "prior_version": record.version,
+        "created_at": record.created_at,
+        "updated_at": known,
+    }
+    data["canonical_content_hash"] = _record_hash(data)
+    return ThesisRecord.model_validate(data)

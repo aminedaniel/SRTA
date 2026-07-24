@@ -104,3 +104,85 @@ def test_duckdb_round_trip_idempotency_and_point_in_time(tmp_path) -> None:
             store.store_thesis_record(bad)
     finally:
         store.close()
+
+
+def test_timestamp_boundaries_and_regression_rejected() -> None:
+    base = create_initial_thesis_record(_report())
+    same = transition_thesis(
+        base, ThesisStatus.ACTIVE, "same boundary", base.effective_at, base.known_at
+    )
+    assert same.status == ThesisStatus.ACTIVE
+    with pytest.raises(ValueError):
+        transition_thesis(
+            base, ThesisStatus.ACTIVE, "bad", datetime(2026, 7, 16, tzinfo=UTC), base.known_at
+        )
+    with pytest.raises(ValueError):
+        transition_thesis(
+            base, ThesisStatus.ACTIVE, "bad", base.effective_at, datetime(2026, 7, 16, tzinfo=UTC)
+        )
+    with pytest.raises(ValueError):
+        transition_thesis(
+            base,
+            ThesisStatus.ACTIVE,
+            "bad",
+            datetime(2026, 7, 18, tzinfo=UTC),
+            datetime(2026, 7, 17, tzinfo=UTC),
+        )
+
+
+def test_persistence_rejects_direct_invalid_lifecycle_and_corrupt_hash(tmp_path) -> None:
+    report = _report()
+    store = LocalAnalyticalStore(tmp_path / "r.duckdb")
+    try:
+        store.store_research_report(report)
+        rec = create_initial_thesis_record(report)
+        bad_hash = rec.model_copy(update={"canonical_content_hash": "bad"})
+        with pytest.raises(ValueError):
+            store.store_thesis_record(bad_hash)
+        store.store_thesis_record(rec)
+        direct = rec.model_copy(
+            update={"version": 2, "prior_version": 1, "status": ThesisStatus.STRENGTHENING}
+        )
+        with pytest.raises(ValueError):
+            store.store_thesis_record(direct)
+        store.connection.execute(
+            "UPDATE research_reports SET content_hash='corrupt' WHERE report_id=?",
+            [report.report_id],
+        )
+        with pytest.raises(ValueError):
+            store.load_research_report(report.report_id)
+    finally:
+        store.close()
+
+
+def test_multiple_thesis_series_chronological_selection(tmp_path) -> None:
+    report = _report()
+    store = LocalAnalyticalStore(tmp_path / "r.duckdb")
+    try:
+        store.store_research_report(report)
+        first = create_initial_thesis_record(report)
+        store.store_thesis_record(first)
+        terminal = transition_thesis(
+            first, ThesisStatus.ACTIVE, "review", first.effective_at, first.known_at
+        )
+        store.store_thesis_record(terminal)
+        second = create_initial_thesis_record(report).model_copy(
+            update={
+                "thesis_id": "thesis_zz_newseries",
+                "known_at": datetime(2026, 7, 20, tzinfo=UTC),
+                "effective_at": datetime(2026, 7, 20, tzinfo=UTC),
+                "created_at": datetime(2026, 7, 20, tzinfo=UTC),
+                "updated_at": datetime(2026, 7, 20, tzinfo=UTC),
+            }
+        )
+        from smct_research.research.thesis import thesis_record_hash
+
+        second = second.model_copy(update={"canonical_content_hash": thesis_record_hash(second)})
+        store.store_thesis_record(second)
+        assert store.load_latest_thesis(ticker="ACME").thesis_id == "thesis_zz_newseries"
+        assert (
+            store.load_thesis_as_of(datetime(2026, 7, 19, tzinfo=UTC), ticker="ACME").thesis_id
+            == first.thesis_id
+        )
+    finally:
+        store.close()

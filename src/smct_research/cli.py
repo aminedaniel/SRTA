@@ -22,6 +22,7 @@ from smct_research.estimates.models import EstimateBasis, EstimateMetric, Estima
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
+from smct_research.research.models import canonical_json
 from smct_research.research.render import render_markdown
 from smct_research.research.report import ResearchReportBuilder
 from smct_research.research.thesis import create_initial_thesis_record, transition_thesis
@@ -405,35 +406,46 @@ def report_command(
     database: Path | None = typer.Option(None),  # noqa: B008
     save_report: bool = typer.Option(False),
     create_thesis: bool = typer.Option(False),
+    config: Path | None = typer.Option(None),  # noqa: B008
 ) -> None:
     """Build a deterministic point-in-time company research report."""
     try:
+        if save_report and database is None:
+            raise ValueError("--save-report requires --database")
+        if create_thesis and database is None:
+            raise ValueError("--create-thesis requires --database")
         evaluation_as_of = _parse_timestamp(as_of, "--as-of")
+        policy_data: dict[str, object] = {}
+        if config:
+            policy_data = _load_universe_policy_data(config)
+        policy = UniversePolicy.model_validate(policy_data)
         companies = load_universe(universe_file)
         wanted = ticker.upper().strip()
         matches = [c for c in companies if c.ticker == wanted]
         if not matches:
             raise ValueError(f"Missing ticker: {wanted}")
+        if len(matches) > 1:
+            raise ValueError(f"Duplicate universe ticker: {wanted}")
         snapshots = load_feature_snapshots(features_directory)
         if wanted not in snapshots:
             raise ValueError(f"Missing feature snapshot: {wanted}")
         registry = default_registry()
         scorer = CompositeResearchScorer()
         ranked = BatchEvaluationService(registry, scorer).evaluate(
-            companies, snapshots, UniversePolicy(), evaluation_as_of, include_ineligible=True
+            companies, snapshots, policy, evaluation_as_of, include_ineligible=True
         )
         selected = next(item for item in ranked if item.ticker == wanted)
         report = ResearchReportBuilder(scorer, list(registry.all())).build(
             matches[0], snapshots[wanted], selected, evaluation_as_of
         )
         if output_json:
-            output_json.write_text(report.model_dump_json(indent=2) + "\n")
+            output_json.write_text(canonical_json(report.model_dump(mode="python")) + "\n")
         if output_markdown:
             output_markdown.write_text(render_markdown(report))
         if database and (save_report or create_thesis):
             store = LocalAnalyticalStore(database)
             try:
-                if save_report:
+                if save_report or create_thesis:
                     store.store_research_report(  # type: ignore[attr-defined]
                         report
                     )
@@ -449,54 +461,84 @@ def report_command(
 
 
 @app.command("thesis-list")
-def thesis_list(database: Path, ticker: str | None = typer.Option(None)) -> None:
+def thesis_list(
+    database: Path,
+    ticker: str | None = typer.Option(None),
+    thesis_id: str | None = typer.Option(None),
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+) -> None:
     """List append-only thesis versions."""
     try:
         store = LocalAnalyticalStore(database)
         try:
             rows = store.load_thesis_history(  # type: ignore[attr-defined]
-                ticker=ticker.upper().strip() if ticker else None
+                thesis_id=thesis_id, ticker=ticker.upper().strip() if ticker else None
             )
         finally:
             store.close()
     except (OSError, ValueError, RuntimeError) as error:
         raise typer.BadParameter(str(error)) from error
+    payload = [row.model_dump(mode="python") for row in rows]
+    if output_json:
+        output_json.write_text(canonical_json(payload) + "\n")
     for row in rows:
         typer.echo(
-            f"{row.ticker} {row.thesis_id} v{row.version} {row.status.value} known_at={row.known_at.isoformat()}"
+            " ".join(
+                [
+                    row.thesis_id,
+                    f"v{row.version}",
+                    row.ticker,
+                    row.status.value,
+                    f"effective_at={row.effective_at.isoformat()}",
+                    f"known_at={row.known_at.isoformat()}",
+                    f"source_report_id={row.source_report_id}",
+                    f"reason={row.revision_reason}",
+                ]
+            )
         )
 
 
 @app.command("thesis-show")
 def thesis_show(
-    database: Path, ticker: str = typer.Option(...), as_of: str | None = typer.Option(None)
+    database: Path,
+    ticker: str | None = typer.Option(None),
+    thesis_id: str | None = typer.Option(None),
+    as_of: str | None = typer.Option(None),
 ) -> None:
     """Show latest or point-in-time visible thesis."""
     try:
+        if ticker is None and thesis_id is None:
+            raise ValueError("Either --ticker or --thesis-id is required")
         store = LocalAnalyticalStore(database)
         try:
+            history = store.load_thesis_history(  # type: ignore[attr-defined]
+                thesis_id=thesis_id, ticker=ticker
+            )
+            if not history:
+                raise ValueError("No thesis exists for query")
             row = (
                 store.load_thesis_as_of(  # type: ignore[attr-defined]
-                    _parse_timestamp(as_of, "--as-of"), ticker=ticker
+                    _parse_timestamp(as_of, "--as-of"), thesis_id=thesis_id, ticker=ticker
                 )
                 if as_of
                 else store.load_latest_thesis(  # type: ignore[attr-defined]
-                    ticker=ticker
+                    thesis_id=thesis_id, ticker=ticker
                 )
             )
         finally:
             store.close()
         if row is None:
-            raise ValueError("No thesis visible for query")
+            raise ValueError("A thesis exists but is not visible at the requested as-of timestamp")
     except (OSError, ValueError, RuntimeError) as error:
         raise typer.BadParameter(str(error)) from error
-    typer.echo(row.model_dump_json(indent=2))
+    typer.echo(canonical_json(row.model_dump(mode="python")))
 
 
 @app.command("thesis-transition")
 def thesis_transition(
     database: Path,
-    ticker: str = typer.Option(...),
+    ticker: str | None = typer.Option(None),
+    thesis_id: str | None = typer.Option(None),
     status: ThesisStatus = typer.Option(...),  # noqa: B008
     reason: str = typer.Option(...),
     effective_at: str = typer.Option(...),
@@ -504,13 +546,15 @@ def thesis_transition(
 ) -> None:
     """Append a thesis lifecycle transition version."""
     try:
+        if ticker is None and thesis_id is None:
+            raise ValueError("Either --ticker or --thesis-id is required")
         store = LocalAnalyticalStore(database)
         try:
             latest = store.load_latest_thesis(  # type: ignore[attr-defined]
-                ticker=ticker
+                thesis_id=thesis_id, ticker=ticker
             )
             if latest is None:
-                raise ValueError("No thesis found for ticker")
+                raise ValueError("No thesis found for query")
             new = transition_thesis(
                 latest,
                 status,
@@ -525,7 +569,7 @@ def thesis_transition(
             store.close()
     except (OSError, ValueError, RuntimeError) as error:
         raise typer.BadParameter(str(error)) from error
-    typer.echo(f"Stored thesis {new.thesis_id} v{new.version} {new.status.value}")
+    typer.echo(canonical_json(new.model_dump(mode="python")))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import pytest
 from typer.testing import CliRunner
 
 from smct_research.cli import app, default_registry
@@ -111,3 +112,112 @@ def test_cli_report_outputs_and_no_traceback(tmp_path) -> None:
         ],
     )
     assert bad.exit_code != 0 and "Traceback" not in bad.output
+
+
+def test_report_identity_uses_full_content_and_canonicalizes_unordered_fields() -> None:
+    one = _report("ACME")
+    data = one.model_dump(mode="python")
+    data["provenance"] = {"z": "last", **data["provenance"]}
+    from smct_research.research.models import (
+        CompanyResearchReport,
+        report_content_hash,
+        report_id_for_payload,
+    )
+
+    data["report_id"] = report_id_for_payload(data)
+    data["canonical_content_hash"] = report_content_hash(data)
+    changed = CompanyResearchReport.model_validate(data)
+    assert changed.report_id != one.report_id
+    assert changed.canonical_content_hash != one.canonical_content_hash
+
+    reordered = one.model_dump(mode="python")
+    reordered["supporting_evidence"] = tuple(reversed(reordered["supporting_evidence"]))
+    reordered["signal_assessments"] = tuple(reversed(reordered["signal_assessments"]))
+    reordered["report_id"] = report_id_for_payload(reordered)
+    reordered["canonical_content_hash"] = report_content_hash(reordered)
+    assert (
+        CompanyResearchReport.model_validate(reordered).model_dump_json() == one.model_dump_json()
+    )
+
+
+def test_model_validation_and_input_mapping_defensive_copy() -> None:
+    from pydantic import ValidationError
+
+    from smct_research.research.models import (
+        CompanyResearchReport,
+        SignalAssessment,
+        ValuationSummary,
+    )
+
+    metadata = {"nested": {"items": ["b", "a"]}}
+    assessment = SignalAssessment(signal_id="X", score=1, confidence=0.5, metadata=metadata)
+    metadata["nested"]["items"].append("c")
+    assert assessment.metadata == {"nested": {"items": ["a", "b"]}}
+    with pytest.raises(ValidationError):
+        SignalAssessment(signal_id="X", score=101, confidence=0.5)
+    with pytest.raises(ValidationError):
+        ValuationSummary(current_market_price=-1)
+    report = _report("ACME")
+    data = report.model_dump(mode="python")
+    data["signal_assessments"] = (report.signal_assessments[0], report.signal_assessments[0])
+    with pytest.raises(ValidationError):
+        CompanyResearchReport.model_validate(data)
+    data = report.model_dump(mode="python")
+    data["universe_eligible"] = False
+    data["exclusion_reasons"] = ()
+    with pytest.raises(ValidationError):
+        CompanyResearchReport.model_validate(data)
+
+
+def test_unknown_signal_weight_is_explicitly_unavailable() -> None:
+    report = _report("ACME")
+    m1 = next(item for item in report.signal_assessments if item.signal_id == "M1")
+    assert m1.weighted_contribution is None
+
+
+def test_cli_persistence_requirements_and_json_list(tmp_path) -> None:
+    runner = CliRunner()
+    out = runner.invoke(
+        app,
+        [
+            "report",
+            "examples/screening/universe.json",
+            "examples/screening/features",
+            "--ticker",
+            "ACME",
+            "--as-of",
+            "2026-07-17T00:00:00Z",
+            "--save-report",
+        ],
+    )
+    assert (
+        out.exit_code != 0
+        and "--save-report requires --database" in out.output
+        and "Traceback" not in out.output
+    )
+    db = tmp_path / "research.duckdb"
+    assert (
+        runner.invoke(
+            app,
+            [
+                "report",
+                "examples/screening/universe.json",
+                "examples/screening/features",
+                "--ticker",
+                "ACME",
+                "--as-of",
+                "2026-07-17T00:00:00Z",
+                "--database",
+                str(db),
+                "--save-report",
+                "--create-thesis",
+            ],
+        ).exit_code
+        == 0
+    )
+    json_out = tmp_path / "theses.json"
+    listed = runner.invoke(
+        app, ["thesis-list", str(db), "--ticker", "ACME", "--output-json", str(json_out)]
+    )
+    assert listed.exit_code == 0 and "source_report_id=" in listed.output
+    assert json.loads(json_out.read_text())[0]["ticker"] == "ACME"

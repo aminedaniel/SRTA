@@ -343,7 +343,17 @@ LocalAnalyticalStore.store_repository_mappings = store_repository_mappings  # ty
 LocalAnalyticalStore.load_repository_mappings = load_repository_mappings  # type: ignore[attr-defined]
 
 # Research report and append-only thesis persistence.
-from smct_research.research.models import CompanyResearchReport, ThesisRecord  # noqa: E402
+from smct_research.research.models import (  # noqa: E402
+    CompanyResearchReport,
+    ThesisRecord,
+    validate_report_identity,
+)
+from smct_research.research.thesis import (  # noqa: E402
+    ALLOWED_TRANSITIONS,
+    TERMINAL_STATUSES,
+    thesis_record_hash,
+    validate_thesis_record_hash,
+)
 
 
 def _ensure_research_tables(self: LocalAnalyticalStore) -> None:
@@ -357,6 +367,7 @@ def _ensure_research_tables(self: LocalAnalyticalStore) -> None:
 
 def store_research_report(self: LocalAnalyticalStore, report: CompanyResearchReport) -> None:
     _ensure_research_tables(self)
+    validate_report_identity(report)
     payload = report.model_dump_json()
     existing = self.connection.execute(
         "SELECT content_hash, payload_json FROM research_reports WHERE report_id=?",
@@ -379,14 +390,72 @@ def store_research_report(self: LocalAnalyticalStore, report: CompanyResearchRep
     )
 
 
+def _validate_loaded_report(row: tuple[str, str] | None) -> CompanyResearchReport | None:
+    if row is None:
+        return None
+    stored_hash, payload = row
+    report = CompanyResearchReport.model_validate_json(payload)
+    if stored_hash != report.canonical_content_hash:
+        raise ValueError("corrupt research report stored hash mismatch")
+    validate_report_identity(report)
+    return report
+
+
 def load_research_report(
     self: LocalAnalyticalStore, report_id: str
 ) -> CompanyResearchReport | None:
     _ensure_research_tables(self)
     row = self.connection.execute(
-        "SELECT payload_json FROM research_reports WHERE report_id=?", [report_id]
+        "SELECT content_hash, payload_json FROM research_reports WHERE report_id=?", [report_id]
     ).fetchone()
-    return CompanyResearchReport.model_validate_json(row[0]) if row else None
+    return _validate_loaded_report(row)
+
+
+def _require_source_report(
+    self: LocalAnalyticalStore, record: ThesisRecord
+) -> CompanyResearchReport:
+    report = load_research_report(self, record.source_report_id)
+    if report is None:
+        raise ValueError("source research report does not exist")
+    if report.ticker != record.ticker:
+        raise ValueError("source report ticker does not match thesis ticker")
+    if report.as_of != record.source_report_as_of:
+        raise ValueError("source report as_of does not match thesis record")
+    if report.as_of > record.known_at:
+        raise ValueError("source report is not known by thesis known_at")
+    return report
+
+
+def _validate_thesis_for_store(self: LocalAnalyticalStore, record: ThesisRecord) -> None:
+    validate_thesis_record_hash(record)
+    _require_source_report(self, record)
+    if record.version == 1:
+        if record.status.value != "draft" or record.prior_version is not None:
+            raise ValueError("initial thesis version must be draft without prior version")
+        return
+    prior_row = self.connection.execute(
+        "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=? AND version=?",
+        [record.thesis_id, record.version - 1],
+    ).fetchone()
+    if prior_row is None:
+        raise ValueError("preceding thesis version is missing")
+    prior = _validate_loaded_thesis(prior_row)
+    if prior.thesis_id != record.thesis_id or prior.ticker != record.ticker:
+        raise ValueError("thesis identity changed across versions")
+    if record.prior_version != prior.version or record.version != prior.version + 1:
+        raise ValueError("invalid thesis version sequence")
+    if prior.status in TERMINAL_STATUSES:
+        raise ValueError("cannot continue terminal thesis series")
+    if record.status not in ALLOWED_TRANSITIONS[prior.status]:
+        raise ValueError(
+            f"invalid thesis transition: {prior.status.value} -> {record.status.value}"
+        )
+    if record.effective_at < prior.effective_at:
+        raise ValueError("effective_at cannot move backward")
+    if record.known_at < prior.known_at:
+        raise ValueError("known_at cannot move backward")
+    if record.updated_at < prior.updated_at:
+        raise ValueError("updated_at cannot move backward")
 
 
 def store_thesis_record(self: LocalAnalyticalStore, record: ThesisRecord) -> None:
@@ -400,21 +469,14 @@ def store_thesis_record(self: LocalAnalyticalStore, record: ThesisRecord) -> Non
         if existing[0] == record.canonical_content_hash and existing[1] == payload:
             return
         raise ValueError("conflicting immutable thesis version")
-    rows = self.connection.execute(
-        "SELECT version, ticker FROM research_thesis_versions WHERE thesis_id=? ORDER BY version",
-        [record.thesis_id],
-    ).fetchall()
-    if rows:
-        tickers = {r[1] for r in rows}
-        if tickers != {record.ticker}:
-            raise ValueError("ticker mismatch for thesis id")
-        latest = max(int(r[0]) for r in rows)
-        if record.version != latest + 1:
-            raise ValueError("thesis versions must be sequential")
-        if record.prior_version != latest:
-            raise ValueError("prior version must reference latest version")
-    elif record.version != 1 or record.prior_version is not None:
-        raise ValueError("first thesis version must be version 1 without prior version")
+    if record.version == 1:
+        any_existing = self.connection.execute(
+            "SELECT ticker FROM research_thesis_versions WHERE thesis_id=? LIMIT 1",
+            [record.thesis_id],
+        ).fetchone()
+        if any_existing is not None:
+            raise ValueError("cannot restart existing thesis series")
+    _validate_thesis_for_store(self, record)
     self.connection.execute(
         "INSERT INTO research_thesis_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
@@ -433,32 +495,62 @@ def store_thesis_record(self: LocalAnalyticalStore, record: ThesisRecord) -> Non
     )
 
 
+def _validate_loaded_thesis(row: tuple[str, str]) -> ThesisRecord:
+    stored_hash, payload = row
+    record = ThesisRecord.model_validate_json(payload)
+    if stored_hash != record.canonical_content_hash:
+        raise ValueError("corrupt thesis stored hash mismatch")
+    if thesis_record_hash(record) != record.canonical_content_hash:
+        raise ValueError("corrupt thesis payload hash mismatch")
+    return record
+
+
+def _history_sort_key(record: ThesisRecord) -> tuple[datetime, datetime, int, str]:
+    return (record.known_at, record.effective_at, record.version, record.thesis_id)
+
+
 def load_thesis_history(
     self: LocalAnalyticalStore, thesis_id: str | None = None, ticker: str | None = None
 ) -> list[ThesisRecord]:
     _ensure_research_tables(self)
     if thesis_id:
         rows = self.connection.execute(
-            "SELECT payload_json FROM research_thesis_versions WHERE thesis_id=? ORDER BY version",
+            "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=?",
             [thesis_id],
         ).fetchall()
     elif ticker:
         rows = self.connection.execute(
-            "SELECT payload_json FROM research_thesis_versions WHERE ticker=? ORDER BY thesis_id, version",
+            "SELECT content_hash, payload_json FROM research_thesis_versions WHERE ticker=?",
             [ticker.upper().strip()],
         ).fetchall()
     else:
         rows = self.connection.execute(
-            "SELECT payload_json FROM research_thesis_versions ORDER BY ticker, thesis_id, version"
+            "SELECT content_hash, payload_json FROM research_thesis_versions"
         ).fetchall()
-    return [ThesisRecord.model_validate_json(r[0]) for r in rows]
+    records = [_validate_loaded_thesis(r) for r in rows]
+    return sorted(records, key=_history_sort_key)
+
+
+def _select_record(
+    records: list[ThesisRecord], *, thesis_id: str | None, ticker: str | None
+) -> ThesisRecord | None:
+    if not records:
+        return None
+    records = sorted(records, key=_history_sort_key)
+    latest = records[-1]
+    tied = [r for r in records if _history_sort_key(r) == _history_sort_key(latest)]
+    series = {r.thesis_id for r in tied}
+    if thesis_id is None and ticker is not None and len(series) > 1:
+        raise ValueError("multiple thesis series are ambiguous; pass --thesis-id")
+    return latest
 
 
 def load_latest_thesis(
     self: LocalAnalyticalStore, thesis_id: str | None = None, ticker: str | None = None
 ) -> ThesisRecord | None:
-    history = load_thesis_history(self, thesis_id, ticker)
-    return history[-1] if history else None
+    return _select_record(
+        load_thesis_history(self, thesis_id, ticker), thesis_id=thesis_id, ticker=ticker
+    )
 
 
 def load_thesis_as_of(
@@ -472,12 +564,12 @@ def load_thesis_as_of(
         if query_as_of.tzinfo is None
         else query_as_of.astimezone(UTC)
     )
-    visible = [
+    records = [
         r
         for r in load_thesis_history(self, thesis_id, ticker)
         if r.known_at <= asof and r.effective_at <= asof
     ]
-    return visible[-1] if visible else None
+    return _select_record(records, thesis_id=thesis_id, ticker=ticker)
 
 
 LocalAnalyticalStore.store_research_report = store_research_report  # type: ignore[attr-defined]

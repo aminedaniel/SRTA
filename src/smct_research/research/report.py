@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -16,7 +15,8 @@ from smct_research.research.models import (
     CompanyResearchReport,
     SignalAssessment,
     ValuationSummary,
-    content_hash,
+    report_content_hash,
+    report_id_for_payload,
 )
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.models import RankedResult, UniverseEntry
@@ -56,9 +56,7 @@ class ResearchReportBuilder:
                         score=result.score,
                         confidence=result.confidence,
                         direction=result.direction,
-                        weighted_contribution=signal_weighted_contribution(
-                            result, self.scorer.weights.get(sid, 1.0)
-                        ),
+                        weighted_contribution=self._weighted_contribution_or_none(result),
                         thesis=result.thesis,
                         evidence=tuple(result.evidence),
                         risks=tuple(result.risks),
@@ -88,6 +86,12 @@ class ResearchReportBuilder:
         )
         support = tuple(f"{a.signal_id}: {e}" for a in positives for e in a.evidence)
         contra = tuple(f"{a.signal_id}: {e}" for a in negatives for e in a.evidence)
+        context = tuple(
+            f"{a.signal_id}: {e}"
+            for a in available
+            if a.direction == SignalDirection.NEUTRAL
+            for e in a.evidence
+        )
         risks = _sorted_unique(
             [f"{a.signal_id}: {r}" for a in available for r in a.risks]
             + list(ranked.exclusion_reasons)
@@ -116,64 +120,52 @@ class ResearchReportBuilder:
         )
         source_ts = dict(sorted((snapshot.source_as_of if snapshot else {}).items()))
         provenance = dict(sorted((snapshot.sources if snapshot else {}).items()))
-        base: dict[str, Any] = {
+        report_data: dict[str, Any] = {
+            "schema_version": "research_report.v1",
             "ticker": company.ticker,
-            "as_of": ts.isoformat(),
-            "rank": ranked.rank,
-            "score": ranked.composite_score,
-            "confidence": ranked.composite_confidence,
-            "signals": [a.model_dump(mode="json") for a in assessments],
-            "valuation": valuation.model_dump(mode="json"),
-            "eligible": ranked.universe_eligible,
-            "exclusions": sorted(ranked.exclusion_reasons),
-        }
-        report_id = (
-            "report_"
-            + hashlib.sha256(
-                __import__("json").dumps(base, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()[:24]
-        )
-        payload_hash = content_hash(
-            {**base, "report_id": report_id, "thesis": thesis.model_dump(mode="json")}
-        )
-        return CompanyResearchReport(
-            report_id=report_id,
-            ticker=company.ticker,
-            company_name=company.display_name,
-            universe_metadata={
+            "company_name": company.display_name,
+            "universe_metadata": {
                 "sector": company.sector,
                 "industry": company.industry,
                 "exchange": company.exchange,
                 "market_cap_usd": company.market_cap_usd,
             },
-            as_of=ts,
-            universe_eligible=ranked.universe_eligible,
-            exclusion_reasons=tuple(sorted(ranked.exclusion_reasons)),
-            rank=ranked.rank,
-            composite_research_score=ranked.composite_score,
-            composite_confidence=ranked.composite_confidence,
-            feature_completeness=ranked.feature_completeness_percentage,
-            executive_summary=summary,
-            variant_perception=variant,
-            signal_assessments=tuple(assessments),
-            supporting_evidence=support,
-            contradictory_evidence=contra,
-            key_risks=risks,
-            catalysts=catalysts,
-            catalyst_summary="No evidence-backed catalysts are currently recorded."
+            "as_of": ts,
+            "universe_eligible": ranked.universe_eligible,
+            "exclusion_reasons": tuple(sorted(ranked.exclusion_reasons)),
+            "rank": ranked.rank,
+            "composite_research_score": ranked.composite_score,
+            "composite_confidence": ranked.composite_confidence,
+            "feature_completeness": ranked.feature_completeness_percentage,
+            "executive_summary": summary,
+            "variant_perception": variant,
+            "signal_assessments": tuple(assessments),
+            "supporting_evidence": support,
+            "contradictory_evidence": contra,
+            "contextual_evidence": context,
+            "key_risks": risks,
+            "catalysts": catalysts,
+            "catalyst_summary": "No evidence-backed catalysts are currently recorded."
             if not catalysts
             else "Evidence-backed catalysts are recorded.",
-            invalidation_conditions=invalidations,
-            valuation_summary=valuation,
-            missing_evidence=missing,
-            unavailable_signals=tuple(sorted(ranked.unavailable_signals)),
-            stale_evidence_warnings=tuple(sorted(ranked.stale_evidence_warnings)),
-            point_in_time_warnings=tuple(sorted(ranked.point_in_time_eligibility_warnings)),
-            provenance=provenance,
-            source_timestamps=source_ts,
-            candidate_thesis=thesis,
-            canonical_content_hash=payload_hash,
-        )
+            "invalidation_conditions": invalidations,
+            "valuation_summary": valuation,
+            "missing_evidence": missing,
+            "unavailable_signals": tuple(sorted(ranked.unavailable_signals)),
+            "stale_evidence_warnings": tuple(sorted(ranked.stale_evidence_warnings)),
+            "point_in_time_warnings": tuple(sorted(ranked.point_in_time_eligibility_warnings)),
+            "provenance": provenance,
+            "source_timestamps": source_ts,
+            "candidate_thesis": thesis,
+        }
+        report_data["report_id"] = report_id_for_payload(report_data)
+        report_data["canonical_content_hash"] = report_content_hash(report_data)
+        return CompanyResearchReport(**report_data)
+
+    def _weighted_contribution_or_none(self, result: SignalResult) -> float | None:
+        if result.signal_id not in self.scorer.weights:
+            return None
+        return signal_weighted_contribution(result, self.scorer.weights[result.signal_id])
 
     def _valuation(
         self, snapshot: FeatureSnapshot | None, assessments: list[SignalAssessment]

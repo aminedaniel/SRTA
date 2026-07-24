@@ -57,4 +57,5 @@
 - Completed: append-only persistent thesis records.
 - Not completed here: catalyst tracking over time, weekly watchlist change report, validation framework.
 - See `docs/RESEARCH_REPORTS.md` for schema, point-in-time behavior, lifecycle transitions, persistence, and CLI examples.
+Additional hardening documents full canonical report identity, canonical versus ranked ordering, unknown signal-weight handling, hash verification, source-report integrity, timestamp progression, multiple thesis-series selection, `--thesis-id` CLI behavior, and controlled error semantics.
 

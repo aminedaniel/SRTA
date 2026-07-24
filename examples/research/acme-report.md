@@ -1,7 +1,7 @@
 # ACME — Company Research Report
 
 ## Research snapshot
-- Report ID: report_bfd1be0de1864d364cb99e1d
+- Report ID: report_36248294f9156adcee33e1bf
 - As of: 2026-07-17T00:00:00+00:00
 - Company: Acme Analytics
 - Universe eligible: True
@@ -30,7 +30,7 @@ The market appears to price weaker growth than current signal evidence supports.
 | Form 4 Cluster Buying | positive | 7.005240165463578 | 0.7016302387737133 | 4.177825080467205 | A recent public cluster of open-market insider purchases corroborates, but does not independently establish, the research thesis. |
 | Reddit Awareness and Crowding | positive | 49.5 | 0.45 | 16.70625 | Operating momentum is stronger than Reddit awareness, suggesting an underfollowed setup. |
 | Renaissance Public Equity Activity | positive | 2.8 | 0.36 | 0.252 | Renaissance public equity disclosure is weak, delayed corroboration only. |
-| Federal Reserve and liquidity regime | neutral | 0.0 | 0.8 | 0.0 | Macro context is expansion/easing; bounded modifier reflects company rate sensitivity. |
+| Federal Reserve and liquidity regime | neutral | 0.0 | 0.8 | Unavailable | Macro context is expansion/easing; bounded modifier reflects company rate sensitivity. |
 
 ## Valuation and market expectations
 - Current market price: 19.5
@@ -46,21 +46,21 @@ The market appears to price weaker growth than current signal evidence supports.
 ## Supporting evidence
 - A1: EV/Sales is 62% below its three-year median.
 - A1: Revenue growth is 5% below its three-year median.
-- E2: Purchases/sales disclosed in 90 days: 5/0.
-- E2: Unique purchasing households: 4.
-- E2: Estimated disclosed purchase value: $500,000.
-- E2: Median disclosure lag: 20 days; latest purchase age: 10 days.
-- E2: Committee relevance: 70/100; repeat-buyer score: 60/100.
-- F1: Thirty-day Reddit mentions: 50.
-- F1: Attention percentile: 20; operating momentum: 75.
-- F1: Promotional-language share: 5.
+- A2: Annual dilution assumption: 1.5%.
 - A2: Base scenario upside/downside: 28%.
 - A2: Implied growth gap: -4%; margin gap: 1%.
 - A2: Terminal value represents 68% of enterprise value.
-- A2: Annual dilution assumption: 1.5%.
-- E3: Unique qualifying buyers in seven days: 4.
+- E2: Committee relevance: 70/100; repeat-buyer score: 60/100.
+- E2: Estimated disclosed purchase value: $500,000.
+- E2: Median disclosure lag: 20 days; latest purchase age: 10 days.
+- E2: Purchases/sales disclosed in 90 days: 5/0.
+- E2: Unique purchasing households: 4.
 - E3: 7-day triggered-cluster purchase value: $400,000 (0.100% of market capitalization).
 - E3: Newest qualifying filing age: 2 days.
+- E3: Unique qualifying buyers in seven days: 4.
+- F1: Attention percentile: 20; operating momentum: 75.
+- F1: Promotional-language share: 5.
+- F1: Thirty-day Reddit mentions: 50.
 - I1: 13F activity: increased; share-count change: 30.0%.
 - I1: Consecutive disclosed quarters held: 3; position-size percentile: 80.
 - I1: Disclosure age: 45 days; lag-adjusted decay: 0.70.
@@ -70,6 +70,11 @@ The market appears to price weaker growth than current signal evidence supports.
 
 ## Catalysts
 - No evidence-backed catalysts are currently recorded.
+
+## Contextual evidence
+- M1: Liquidity regime: expansion
+- M1: Policy regime: easing
+- M1: Sensitivity score: 0.0/100
 
 ## Key risks
 - A1: Historical multiples may have been structurally excessive.
@@ -89,10 +94,10 @@ The market appears to price weaker growth than current signal evidence supports.
 
 ## Invalidation conditions
 - A1: principal positive evidence becomes stale, unavailable, or contradicted.
+- A2: dilution or share-count risk exceeds the level recorded in valuation evidence.
+- A2: reverse-DCF expectations gap closes because price rises or operating assumptions weaken.
 - E2: principal positive evidence becomes stale, unavailable, or contradicted.
 - F1: principal positive evidence becomes stale, unavailable, or contradicted.
-- A2: reverse-DCF expectations gap closes because price rises or operating assumptions weaken.
-- A2: dilution or share-count risk exceeds the level recorded in valuation evidence.
 
 ## Missing and stale evidence
 ### Missing evidence
@@ -110,3 +115,5 @@ The market appears to price weaker growth than current signal evidence supports.
 
 ## Provenance
 - financials: offline fixture
+### Source timestamps
+- financials: 2026-06-30T00:00:00+00:00

@@ -4,7 +4,7 @@ from smct_research.research.models import CompanyResearchReport
 
 
 def _esc(text: object) -> str:
-    return str(text).replace("|", "\\|").replace("\n", " ").strip()
+    return str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").strip()
 
 
 def _bullets(items: tuple[str, ...] | list[str]) -> str:
@@ -66,6 +66,7 @@ def render_markdown(report: CompanyResearchReport) -> str:
         ("Supporting evidence", report.supporting_evidence),
         ("Contradictory evidence", report.contradictory_evidence),
         ("Catalysts", report.catalysts),
+        ("Contextual evidence", report.contextual_evidence),
         ("Key risks", report.key_risks),
         ("Invalidation conditions", report.invalidation_conditions),
     ]:
@@ -86,6 +87,9 @@ def render_markdown(report: CompanyResearchReport) -> str:
     ]
     lines += ["## Provenance"] + [
         f"- {_esc(k)}: {_esc(v)}" for k, v in sorted(report.provenance.items())
+    ]
+    lines += ["### Source timestamps"] + [
+        f"- {_esc(k)}: {_esc(v.isoformat())}" for k, v in sorted(report.source_timestamps.items())
     ]
     lines.append("")
     return "\n".join(lines)
