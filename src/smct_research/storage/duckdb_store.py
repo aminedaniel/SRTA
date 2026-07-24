@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -340,3 +341,148 @@ LocalAnalyticalStore.store_package_observations = store_package_observations  # 
 LocalAnalyticalStore.load_package_observations = load_package_observations  # type: ignore[attr-defined]
 LocalAnalyticalStore.store_repository_mappings = store_repository_mappings  # type: ignore[attr-defined]
 LocalAnalyticalStore.load_repository_mappings = load_repository_mappings  # type: ignore[attr-defined]
+
+# Research report and append-only thesis persistence.
+from smct_research.research.models import CompanyResearchReport, ThesisRecord  # noqa: E402
+
+
+def _ensure_research_tables(self: LocalAnalyticalStore) -> None:
+    self.connection.execute(
+        "CREATE TABLE IF NOT EXISTS research_reports (report_id VARCHAR PRIMARY KEY, ticker VARCHAR, report_as_of TIMESTAMP, schema_version VARCHAR, content_hash VARCHAR, payload_json VARCHAR)"
+    )
+    self.connection.execute(
+        "CREATE TABLE IF NOT EXISTS research_thesis_versions (thesis_id VARCHAR, version INTEGER, ticker VARCHAR, status VARCHAR, effective_at TIMESTAMP, known_at TIMESTAMP, source_report_id VARCHAR, prior_version INTEGER, revision_reason VARCHAR, content_hash VARCHAR, payload_json VARCHAR, PRIMARY KEY(thesis_id, version))"
+    )
+
+
+def store_research_report(self: LocalAnalyticalStore, report: CompanyResearchReport) -> None:
+    _ensure_research_tables(self)
+    payload = report.model_dump_json()
+    existing = self.connection.execute(
+        "SELECT content_hash, payload_json FROM research_reports WHERE report_id=?",
+        [report.report_id],
+    ).fetchone()
+    if existing:
+        if existing[0] == report.canonical_content_hash and existing[1] == payload:
+            return
+        raise ValueError("conflicting immutable research report")
+    self.connection.execute(
+        "INSERT INTO research_reports VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            report.report_id,
+            report.ticker,
+            report.as_of,
+            report.schema_version,
+            report.canonical_content_hash,
+            payload,
+        ],
+    )
+
+
+def load_research_report(
+    self: LocalAnalyticalStore, report_id: str
+) -> CompanyResearchReport | None:
+    _ensure_research_tables(self)
+    row = self.connection.execute(
+        "SELECT payload_json FROM research_reports WHERE report_id=?", [report_id]
+    ).fetchone()
+    return CompanyResearchReport.model_validate_json(row[0]) if row else None
+
+
+def store_thesis_record(self: LocalAnalyticalStore, record: ThesisRecord) -> None:
+    _ensure_research_tables(self)
+    payload = record.model_dump_json()
+    existing = self.connection.execute(
+        "SELECT content_hash, payload_json FROM research_thesis_versions WHERE thesis_id=? AND version=?",
+        [record.thesis_id, record.version],
+    ).fetchone()
+    if existing:
+        if existing[0] == record.canonical_content_hash and existing[1] == payload:
+            return
+        raise ValueError("conflicting immutable thesis version")
+    rows = self.connection.execute(
+        "SELECT version, ticker FROM research_thesis_versions WHERE thesis_id=? ORDER BY version",
+        [record.thesis_id],
+    ).fetchall()
+    if rows:
+        tickers = {r[1] for r in rows}
+        if tickers != {record.ticker}:
+            raise ValueError("ticker mismatch for thesis id")
+        latest = max(int(r[0]) for r in rows)
+        if record.version != latest + 1:
+            raise ValueError("thesis versions must be sequential")
+        if record.prior_version != latest:
+            raise ValueError("prior version must reference latest version")
+    elif record.version != 1 or record.prior_version is not None:
+        raise ValueError("first thesis version must be version 1 without prior version")
+    self.connection.execute(
+        "INSERT INTO research_thesis_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            record.thesis_id,
+            record.version,
+            record.ticker,
+            record.status.value,
+            record.effective_at,
+            record.known_at,
+            record.source_report_id,
+            record.prior_version,
+            record.revision_reason,
+            record.canonical_content_hash,
+            payload,
+        ],
+    )
+
+
+def load_thesis_history(
+    self: LocalAnalyticalStore, thesis_id: str | None = None, ticker: str | None = None
+) -> list[ThesisRecord]:
+    _ensure_research_tables(self)
+    if thesis_id:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM research_thesis_versions WHERE thesis_id=? ORDER BY version",
+            [thesis_id],
+        ).fetchall()
+    elif ticker:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM research_thesis_versions WHERE ticker=? ORDER BY thesis_id, version",
+            [ticker.upper().strip()],
+        ).fetchall()
+    else:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM research_thesis_versions ORDER BY ticker, thesis_id, version"
+        ).fetchall()
+    return [ThesisRecord.model_validate_json(r[0]) for r in rows]
+
+
+def load_latest_thesis(
+    self: LocalAnalyticalStore, thesis_id: str | None = None, ticker: str | None = None
+) -> ThesisRecord | None:
+    history = load_thesis_history(self, thesis_id, ticker)
+    return history[-1] if history else None
+
+
+def load_thesis_as_of(
+    self: LocalAnalyticalStore,
+    query_as_of: datetime,
+    thesis_id: str | None = None,
+    ticker: str | None = None,
+) -> ThesisRecord | None:
+    asof = (
+        query_as_of.replace(tzinfo=UTC)
+        if query_as_of.tzinfo is None
+        else query_as_of.astimezone(UTC)
+    )
+    visible = [
+        r
+        for r in load_thesis_history(self, thesis_id, ticker)
+        if r.known_at <= asof and r.effective_at <= asof
+    ]
+    return visible[-1] if visible else None
+
+
+LocalAnalyticalStore.store_research_report = store_research_report  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_research_report = load_research_report  # type: ignore[attr-defined]
+LocalAnalyticalStore.store_thesis_record = store_thesis_record  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_thesis_history = load_thesis_history  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_latest_thesis = load_latest_thesis  # type: ignore[attr-defined]
+LocalAnalyticalStore.load_thesis_as_of = load_thesis_as_of  # type: ignore[attr-defined]

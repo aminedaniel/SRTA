@@ -26,6 +26,19 @@
     "security_type": "common_equity"
   },
   {
+    "ticker": "ACME",
+    "company name": "Acme Analytics",
+    "CIK": "1000099",
+    "exchange": "NASDAQ",
+    "sector": "Technology",
+    "industry": "Application Software",
+    "market capitalization": 1800000000,
+    "average daily dollar volume": 9000000,
+    "active/inactive status": "active",
+    "country": "US",
+    "security_type": "common_equity"
+  },
+  {
     "ticker": "CLST",
     "company name": "Cluster Devices",
     "CIK": "1000003",

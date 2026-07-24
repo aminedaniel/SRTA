@@ -48,3 +48,11 @@ evaluates every registered signal whose required fields are present, then normal
 score over evaluated signals only. It orders equal scores by ticker, emits coverage and stale-data
 diagnostics, and can write terminal, JSON, and flat CSV representations. See the local command in
 the README and `examples/screening/` for a reproducible offline example.
+
+## Milestone 4 research reports
+
+- Completed: deterministic company research report.
+- Completed: append-only persistent thesis records.
+- Not completed here: catalyst tracking over time, weekly watchlist change report, validation framework.
+- See `docs/RESEARCH_REPORTS.md` for schema, point-in-time behavior, lifecycle transitions, persistence, and CLI examples.
+

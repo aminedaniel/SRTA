@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 
-from smct_research.core.models import FeatureSnapshot
+from smct_research.core.models import FeatureSnapshot, ThesisStatus, normalize_utc
 from smct_research.core.signal import SignalRegistry
 from smct_research.developer_ecosystem import (
     OfflineDeveloperHistoryProvider,
@@ -22,6 +22,9 @@ from smct_research.estimates.models import EstimateBasis, EstimateMetric, Estima
 from smct_research.estimates.service import calculate_features
 from smct_research.providers.base import ProviderResponseError
 from smct_research.providers.estimates import OfflineEstimateProvider
+from smct_research.research.render import render_markdown
+from smct_research.research.report import ResearchReportBuilder
+from smct_research.research.thesis import create_initial_thesis_record, transition_thesis
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.io import load_feature_snapshots, load_universe, write_csv, write_json
 from smct_research.screening.service import BatchEvaluationService
@@ -35,6 +38,7 @@ from smct_research.signals.reddit_awareness import RedditAwarenessSignal
 from smct_research.signals.renaissance_public_equity import RenaissancePublicEquityActivitySignal
 from smct_research.signals.reverse_dcf_expectations import ReverseDCFExpectationsSignal
 from smct_research.signals.valuation_compression import ValuationCompressionSignal
+from smct_research.storage.duckdb_store import LocalAnalyticalStore
 from smct_research.valuation.reverse_dcf import (
     DCFScenario,
     ReverseDCFInputs,
@@ -380,6 +384,148 @@ def developer_velocity(
             writer.writeheader()
             writer.writerow(row)
     typer.echo(rendered)
+
+
+def _parse_timestamp(value: str, label: str = "timestamp") -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise typer.BadParameter(f"{label} must be an ISO-8601 timestamp") from error
+    return normalize_utc(parsed)
+
+
+@app.command("report")
+def report_command(
+    universe_file: Path,
+    features_directory: Path,
+    ticker: str = typer.Option(...),
+    as_of: str = typer.Option(...),
+    output_json: Path | None = typer.Option(None),  # noqa: B008
+    output_markdown: Path | None = typer.Option(None),  # noqa: B008
+    database: Path | None = typer.Option(None),  # noqa: B008
+    save_report: bool = typer.Option(False),
+    create_thesis: bool = typer.Option(False),
+) -> None:
+    """Build a deterministic point-in-time company research report."""
+    try:
+        evaluation_as_of = _parse_timestamp(as_of, "--as-of")
+        companies = load_universe(universe_file)
+        wanted = ticker.upper().strip()
+        matches = [c for c in companies if c.ticker == wanted]
+        if not matches:
+            raise ValueError(f"Missing ticker: {wanted}")
+        snapshots = load_feature_snapshots(features_directory)
+        if wanted not in snapshots:
+            raise ValueError(f"Missing feature snapshot: {wanted}")
+        registry = default_registry()
+        scorer = CompositeResearchScorer()
+        ranked = BatchEvaluationService(registry, scorer).evaluate(
+            companies, snapshots, UniversePolicy(), evaluation_as_of, include_ineligible=True
+        )
+        selected = next(item for item in ranked if item.ticker == wanted)
+        report = ResearchReportBuilder(scorer, list(registry.all())).build(
+            matches[0], snapshots[wanted], selected, evaluation_as_of
+        )
+        if output_json:
+            output_json.write_text(report.model_dump_json(indent=2) + "\n")
+        if output_markdown:
+            output_markdown.write_text(render_markdown(report))
+        if database and (save_report or create_thesis):
+            store = LocalAnalyticalStore(database)
+            try:
+                if save_report:
+                    store.store_research_report(  # type: ignore[attr-defined]
+                        report
+                    )
+                if create_thesis:
+                    store.store_thesis_record(  # type: ignore[attr-defined]
+                        create_initial_thesis_record(report)
+                    )
+            finally:
+                store.close()
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Built research report {report.report_id} for {report.ticker}")
+
+
+@app.command("thesis-list")
+def thesis_list(database: Path, ticker: str | None = typer.Option(None)) -> None:
+    """List append-only thesis versions."""
+    try:
+        store = LocalAnalyticalStore(database)
+        try:
+            rows = store.load_thesis_history(  # type: ignore[attr-defined]
+                ticker=ticker.upper().strip() if ticker else None
+            )
+        finally:
+            store.close()
+    except (OSError, ValueError, RuntimeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    for row in rows:
+        typer.echo(
+            f"{row.ticker} {row.thesis_id} v{row.version} {row.status.value} known_at={row.known_at.isoformat()}"
+        )
+
+
+@app.command("thesis-show")
+def thesis_show(
+    database: Path, ticker: str = typer.Option(...), as_of: str | None = typer.Option(None)
+) -> None:
+    """Show latest or point-in-time visible thesis."""
+    try:
+        store = LocalAnalyticalStore(database)
+        try:
+            row = (
+                store.load_thesis_as_of(  # type: ignore[attr-defined]
+                    _parse_timestamp(as_of, "--as-of"), ticker=ticker
+                )
+                if as_of
+                else store.load_latest_thesis(  # type: ignore[attr-defined]
+                    ticker=ticker
+                )
+            )
+        finally:
+            store.close()
+        if row is None:
+            raise ValueError("No thesis visible for query")
+    except (OSError, ValueError, RuntimeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(row.model_dump_json(indent=2))
+
+
+@app.command("thesis-transition")
+def thesis_transition(
+    database: Path,
+    ticker: str = typer.Option(...),
+    status: ThesisStatus = typer.Option(...),  # noqa: B008
+    reason: str = typer.Option(...),
+    effective_at: str = typer.Option(...),
+    known_at: str = typer.Option(...),
+) -> None:
+    """Append a thesis lifecycle transition version."""
+    try:
+        store = LocalAnalyticalStore(database)
+        try:
+            latest = store.load_latest_thesis(  # type: ignore[attr-defined]
+                ticker=ticker
+            )
+            if latest is None:
+                raise ValueError("No thesis found for ticker")
+            new = transition_thesis(
+                latest,
+                status,
+                reason,
+                _parse_timestamp(effective_at, "--effective-at"),
+                _parse_timestamp(known_at, "--known-at"),
+            )
+            store.store_thesis_record(  # type: ignore[attr-defined]
+                new
+            )
+        finally:
+            store.close()
+    except (OSError, ValueError, RuntimeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Stored thesis {new.thesis_id} v{new.version} {new.status.value}")
 
 
 if __name__ == "__main__":

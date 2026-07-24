@@ -50,3 +50,11 @@
 - Value-trap and permanent-impairment analysis
 - Signal ablation and combination analysis
 - Sector and market-regime robustness
+
+## Milestone 4 research reports
+
+- Completed: deterministic company research report.
+- Completed: append-only persistent thesis records.
+- Not completed here: catalyst tracking over time, weekly watchlist change report, validation framework.
+- See `docs/RESEARCH_REPORTS.md` for schema, point-in-time behavior, lifecycle transitions, persistence, and CLI examples.
+

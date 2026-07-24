@@ -73,3 +73,11 @@ evidence is never converted into a neutral signal score.
 `smct dcf` runs offline reverse-DCF scenarios (signal A2). `smct revisions estimates.json --ticker
 SRTA --as-of 2026-07-17T00:00:00Z` calculates point-in-time consensus revision features for the
 independent A3 **Consensus Estimate Revision Velocity** signal. See `docs/ESTIMATE_REVISIONS.md`.
+
+## Milestone 4 research reports
+
+- Completed: deterministic company research report.
+- Completed: append-only persistent thesis records.
+- Not completed here: catalyst tracking over time, weekly watchlist change report, validation framework.
+- See `docs/RESEARCH_REPORTS.md` for schema, point-in-time behavior, lifecycle transitions, persistence, and CLI examples.
+
