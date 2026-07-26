@@ -234,13 +234,30 @@ def test_signal_direction_rejects_invalid_and_preserves_none() -> None:
     [
         (SignalAssessment, {"signal_id": "A1", "evidence": "not a collection"}),
         (SignalAssessment, {"signal_id": "A1", "risks": b"not a collection"}),
+        (SignalAssessment, {"signal_id": "A1", "evidence": {"first": "value"}}),
+        (SignalAssessment, {"signal_id": "A1", "evidence": {"second", "first"}}),
+        (SignalAssessment, {"signal_id": "A1", "evidence": (item for item in ["first"])}),
         (SignalAssessment, {"signal_id": "A1", "stale_evidence_warnings": "stale"}),
         (SignalAssessment, {"signal_id": "A1", "point_in_time_warnings": "pit"}),
         (ValuationSummary, {"valuation_compression_evidence": "evidence"}),
         (ValuationSummary, {"missing_valuation_fields": b"field"}),
+        (ValuationSummary, {"valuation_compression_evidence": {"first": "value"}}),
+        (ValuationSummary, {"missing_valuation_fields": frozenset({"field"})}),
         (CompanyResearchReport, {**report().model_dump(), "supporting_evidence": "support"}),
         (CompanyResearchReport, {**report().model_dump(), "signal_assessments": "A1"}),
         (CompanyResearchReport, {**report().model_dump(), "unavailable_signals": "A1"}),
+        (
+            CompanyResearchReport,
+            {**report().model_dump(), "supporting_evidence": {"first": "value"}},
+        ),
+        (
+            CompanyResearchReport,
+            {**report().model_dump(), "supporting_evidence": {"second", "first"}},
+        ),
+        (
+            CompanyResearchReport,
+            {**report().model_dump(), "supporting_evidence": (item for item in ["first"])},
+        ),
     ],
 )
 def test_bare_strings_are_rejected_for_collection_fields(
@@ -252,7 +269,10 @@ def test_bare_strings_are_rejected_for_collection_fields(
 
 def test_ticker_length_convention() -> None:
     assert CompanyIdentity(ticker=" lowercase ", name="Acme").ticker == "LOWERCASE"
+    assert CompanyIdentity(ticker=" ABCDEFGHIJKL ", name="Example").ticker == "ABCDEFGHIJKL"
     assert CompanyIdentity(ticker="ABCDEFGHIJKL", name="Acme").ticker == "ABCDEFGHIJKL"
+    with pytest.raises(ValidationError):
+        CompanyIdentity(ticker=" ABCDEFGHIJKLM ", name="Example")
     with pytest.raises(ValidationError):
         CompanyIdentity(ticker="ABCDEFGHIJKLM", name="Acme")
 
@@ -263,6 +283,21 @@ def test_unavailable_signal_ids_are_trimmed_and_blank_or_duplicate_rejected() ->
         report(unavailable_signals=["   "])
     with pytest.raises(ValidationError, match="duplicate signal IDs"):
         report(unavailable_signals=["A1", " A1 "])
+
+
+@pytest.mark.parametrize("timestamp", [123, object(), "not-a-timestamp"])
+def test_source_timestamp_invalid_inputs_raise_validation_error(timestamp: object) -> None:
+    with pytest.raises(ValidationError):
+        report(source_timestamps={"source": timestamp})
+
+
+def test_valid_tuple_inputs_preserve_supplied_order() -> None:
+    rpt = report(
+        supporting_evidence=("first", "second"),
+        contextual_evidence=("context-1", "context-2"),
+    )
+    assert rpt.supporting_evidence == ("first", "second")
+    assert rpt.contextual_evidence == ("context-1", "context-2")
 
 
 def test_pydantic_json_round_trip_and_schema_with_immutable_mappings() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime
 from enum import StrEnum
 from math import isfinite
@@ -97,11 +97,11 @@ def _freeze_mapping(value: Mapping[str, Any] | None) -> FrozenDict | None:
     return None if value is None else FrozenDict(value)
 
 
-def _freeze_collection(value: Iterable[Any] | None) -> tuple[Any, ...] | None:
+def _freeze_collection(value: Any) -> tuple[Any, ...] | None:
     if value is None:
         return None
-    if isinstance(value, (str, bytes)):
-        raise ValueError("collection fields must be lists or tuples, not strings")
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("ordered collection fields must be lists or tuples")
     return tuple(_freeze(item) for item in value)
 
 
@@ -111,10 +111,16 @@ def _finite(value: float | int | None, field_name: str) -> float | int | None:
     return value
 
 
-def _normalize_datetime(value: datetime | str) -> datetime:
+def _normalize_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return normalize_utc(value)
     if isinstance(value, str):
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return normalize_utc(value)
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("timestamp must be a valid ISO-8601 datetime") from exc
+        return normalize_utc(parsed)
+    raise ValueError("timestamp must be a datetime or ISO-8601 string")
 
 
 class SignalAvailability(StrEnum):
@@ -165,7 +171,7 @@ class SignalAssessment(ImmutableModel):
         "evidence", "risks", "stale_evidence_warnings", "point_in_time_warnings", mode="before"
     )
     @classmethod
-    def freeze_collections(cls, value: Iterable[Any] | None) -> tuple[Any, ...] | None:
+    def freeze_collections(cls, value: Any) -> tuple[Any, ...] | None:
         return _freeze_collection(value)
 
     @field_validator("metadata", mode="before")
@@ -207,7 +213,7 @@ class ValuationSummary(ImmutableModel):
 
     @field_validator("valuation_compression_evidence", "missing_valuation_fields", mode="before")
     @classmethod
-    def freeze_collections(cls, value: Iterable[Any] | None) -> tuple[Any, ...] | None:
+    def freeze_collections(cls, value: Any) -> tuple[Any, ...] | None:
         return _freeze_collection(value)
 
 
@@ -221,7 +227,7 @@ class CompanyIdentity(ImmutableModel):
     country: str | None = None
     cik: str | None = None
 
-    @field_validator("ticker")
+    @field_validator("ticker", mode="before")
     @classmethod
     def normalize_ticker(cls, value: str) -> str:
         normalized = value.upper().strip()
@@ -295,7 +301,7 @@ class CompanyResearchReport(ImmutableModel):
         mode="before",
     )
     @classmethod
-    def freeze_collections(cls, value: Iterable[Any] | None) -> tuple[Any, ...]:
+    def freeze_collections(cls, value: Any) -> tuple[Any, ...]:
         return _freeze_collection(value) or ()
 
     @field_validator("provenance", mode="before")
