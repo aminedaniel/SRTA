@@ -36,7 +36,12 @@ class FeatureSnapshotAssembler:
         """Add deterministic valuation features while preserving upstream evidence provenance."""
         from smct_research.valuation.reverse_dcf import solve_reverse_dcf, value_dcf
 
+        if evidence.ticker != inputs.ticker:
+            raise ValueError("DCF inputs must match the destination ticker")
+        if inputs.valuation_date > evidence.as_of:
+            raise ValueError("DCF valuation cannot be newer than the feature snapshot")
         values = dict(evidence.values)
+        values["current_price"] = inputs.current_share_price
         sources = dict(evidence.sources)
         source_as_of = dict(evidence.source_as_of)
         for field, timestamp in inputs.available_at.items():

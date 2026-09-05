@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from math import isfinite
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -92,6 +93,10 @@ class Company(BaseModel):
     @model_validator(mode="after")
     def normalize_ticker(self) -> Company:
         self.ticker = self.ticker.upper().strip()
+        if not self.ticker or not self.ticker[0].isalnum() or any(
+            not c.isalnum() and c not in ".-" for c in self.ticker
+        ):
+            raise ValueError("Company ticker must contain only letters, digits, dots and hyphens")
         return self
 
 
@@ -115,6 +120,8 @@ class FeatureSnapshot(BaseModel):
         value = self.values.get(key)
         if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
             raise KeyError(f"Required numeric feature missing: {key}")
+        if not isfinite(float(value)):
+            raise ValueError(f"Required numeric feature must be finite: {key}")
         return float(value)
 
 

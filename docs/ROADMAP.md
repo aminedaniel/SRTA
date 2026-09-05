@@ -35,13 +35,13 @@
 - Reddit awareness, sentiment, narrative, and manipulation filters
 - Product-review and web-interest adapters
 
-## Milestone 4 — Research workflow
+## Milestone 4 — Research workflow (implemented in v0.3)
 
 - Ranked discovery screen
-- Company research report
-- Persistent thesis records
+- Company research report (immutable JSON and Markdown)
+- Persistent thesis records (append-only revisions and conflict checks)
 - Invalidation and catalyst tracking
-- Weekly watchlist change report
+- Weekly watchlist change report (on-demand CLI; scheduling is external)
 
 ## Milestone 5 — Validation
 
@@ -50,3 +50,10 @@
 - Value-trap and permanent-impairment analysis
 - Signal ablation and combination analysis
 - Sector and market-regime robustness
+
+## v0.3 delivery notes
+
+SEC import, period alignment, Q1 financial quality, report generation, thesis persistence,
+and watchlist monitoring are implemented. Alternative data acquisition in milestone 3
+is still partly offline. Milestone 5 requires historical datasets and remains open;
+unit tests are not investment-performance validation. See `QUICKSTART.md`.

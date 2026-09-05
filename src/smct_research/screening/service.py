@@ -41,6 +41,12 @@ class BatchEvaluationService:
             if snapshot is None:
                 point_in_time.append("missing_feature_snapshot")
             else:
+                if snapshot.ticker != company.ticker:
+                    raise ValueError("Feature snapshot ticker does not match its universe entry")
+                if (evaluated_at - snapshot.as_of).days > 90:
+                    stale.append("stale_feature_snapshot")
+                if not snapshot.source_as_of:
+                    diagnostics.append("source_availability_not_supplied")
                 if snapshot.as_of > evaluated_at:
                     point_in_time.append("snapshot_as_of_after_evaluation")
                 for source, source_time in snapshot.source_as_of.items():
@@ -68,7 +74,12 @@ class BatchEvaluationService:
                         results.append(result)
                 unavailable = [s.id for s in signals if s.id not in {r.signal_id for r in results}]
             completeness = (100 * len(results) / len(signals)) if signals else 100.0
-            score = self.scorer.score(results) if results else None
+            score = None
+            if results:
+                try:
+                    score = self.scorer.score(results)
+                except ValueError as error:
+                    diagnostics.append(f"composite_unavailable:{error}")
             output.append(
                 RankedResult(
                     ticker=company.ticker,

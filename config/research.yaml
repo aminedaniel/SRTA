@@ -4,16 +4,17 @@ universe:
   minimum_daily_dollar_volume: 2000000
   countries: [US]
 
-scoring:
-  valuation_and_expectations: 0.25
-  business_quality: 0.20
-  operating_momentum: 0.15
-  expectations_gap: 0.15
-  alternative_data: 0.10
-  insider_alignment: 0.10
-  congressional_alignment: 0.05
-  renaissance_public_equity_activity: 0.25
-  crowding_risk: -0.05
+signal_weights:
+  A1: 1.25
+  A2: 1.10
+  A3: 1.00
+  B1: 0.85
+  Q1: 1.15
+  F1: 0.75
+  E2: 0.90
+  E3: 0.85
+  M1: 1.00
+  I1: 0.25
 
 research:
   default_horizon_months: 30

@@ -54,18 +54,27 @@ def _reject_duplicates(tickers: Iterable[str], label: str) -> None:
 
 
 def write_json(path: Path, results: list[RankedResult]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps([result.model_dump(mode="json") for result in results], indent=2) + "\n"
+        json.dumps([result.model_dump(mode="json") for result in results], indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
     )
 
 
 def write_csv(path: Path, results: list[RankedResult]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     rows = [_flat_row(result) for result in results]
     fields = list(rows[0]) if rows else ["rank", "ticker", "company_name", "composite_score"]
-    with path.open("w", newline="") as handle:
+    with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({key: _csv_safe(value) for key, value in row.items()} for row in rows)
+
+
+def _csv_safe(value: str | int | float | None) -> str | int | float | None:
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
 
 
 def _normalize_company(row: dict[str, Any]) -> dict[str, Any]:

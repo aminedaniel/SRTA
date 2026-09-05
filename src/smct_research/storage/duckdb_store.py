@@ -36,6 +36,7 @@ class LocalAnalyticalStore:
                 "install smct-research dependencies"
             ) from error
         self.connection: Any = duckdb.connect(str(database_path))
+        self.connection.execute("SET TimeZone='UTC'")
         self.connection.execute("""CREATE TABLE IF NOT EXISTS raw_sources (
             provider VARCHAR, document_id VARCHAR, retrieved_at TIMESTAMP, source_url VARCHAR,
             payload_json VARCHAR, PRIMARY KEY(provider, document_id))""")
@@ -161,9 +162,9 @@ class LocalAnalyticalStore:
             item.standard_deviation,
             item.estimate_breadth,
             item.source_identifier,
-            item.published_at,
-            item.retrieved_at,
-            item.available_at,
+            item.published_at.replace(tzinfo=None) if item.published_at else None,
+            item.retrieved_at.replace(tzinfo=None),
+            item.available_at.replace(tzinfo=None),
         ]
 
     def store_estimate_snapshots(self, snapshots: Iterable[ConsensusEstimate]) -> None:
@@ -194,7 +195,7 @@ class LocalAnalyticalStore:
                     item.unit,
                     item.currency,
                     item.basis.value,
-                    item.available_at,
+                    item.available_at.replace(tzinfo=None),
                     item.provider,
                 ],
             ).fetchone()

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic, sleep, time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -75,6 +75,8 @@ class SecEdgarProvider(DataProvider):
         rate_limiter: RateLimiter | None = None,
         retry_policy: RetryPolicy | None = None,
         transport: Transport | None = None,
+        cache_max_age_seconds: float = 3600,
+        refresh: bool = False,
     ) -> None:
         if not user_agent.strip() or "@" not in user_agent:
             raise ProviderConfigurationError(
@@ -84,6 +86,8 @@ class SecEdgarProvider(DataProvider):
         self.rate_limiter = rate_limiter or ConservativeRateLimiter()
         self.retry_policy = retry_policy or FixedRetryPolicy()
         self.transport = transport or _urlopen_transport
+        self.cache_max_age_seconds = cache_max_age_seconds
+        self.refresh = refresh
 
     def fetch(self, identifier: str) -> dict[str, Any]:
         return self._get_json(identifier, f"raw/{identifier}.json")
@@ -107,7 +111,11 @@ class SecEdgarProvider(DataProvider):
 
     def _get_json(self, endpoint: str, cache_name: str) -> dict[str, Any]:
         path = self.cache_dir / cache_name
-        if path.exists():
+        if (
+            path.exists()
+            and not self.refresh
+            and time() - path.stat().st_mtime <= self.cache_max_age_seconds
+        ):
             return self._read_json(path)
 
         def download() -> dict[str, Any]:
@@ -116,7 +124,7 @@ class SecEdgarProvider(DataProvider):
                 f"{self.base_url}/{endpoint.lstrip('/')}",
                 {
                     "User-Agent": self.user_agent,
-                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Encoding": "identity",
                     "Host": "data.sec.gov",
                 },
             )
@@ -124,6 +132,8 @@ class SecEdgarProvider(DataProvider):
                 data = json.loads(payload)
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise ProviderResponseError(f"SEC returned invalid JSON for {endpoint}") from error
+            if not isinstance(data, dict):
+                raise ProviderResponseError(f"SEC JSON must be an object for {endpoint}")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
             return data
@@ -184,7 +194,7 @@ class SecEdgarProvider(DataProvider):
                 self.rate_limiter.acquire()
                 payload = self.transport(
                     f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}",
-                    {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"},
+                    {"User-Agent": self.user_agent, "Accept-Encoding": "identity"},
                 )
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_bytes(payload)
@@ -287,7 +297,7 @@ class Renaissance13FEdgarProvider(SecEdgarProvider):
             self.rate_limiter.acquire()
             url = f"https://www.sec.gov/Archives/edgar/data/{int(self.renaissance_cik)}/{accession}/{document_name}"
             payload = self.transport(
-                url, {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+                url, {"User-Agent": self.user_agent, "Accept-Encoding": "identity"}
             )
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(payload)
