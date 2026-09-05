@@ -2,6 +2,20 @@
 
 A systematic research platform for discovering underfollowed and potentially mispriced small- and mid-cap technology companies over a 24–36 month investment horizon.
 
+## Start here
+
+The local screening, report, thesis and monitoring workflow is ready in **v0.3**.
+See [QUICKSTART](docs/QUICKSTART.md) for installation, SEC imports and the complete workflow.
+
+```bash
+smct research examples/screening/universe.json examples/screening/features --as-of 2026-07-17T00:00:00Z
+```
+
+Open `research-output/index.md`. This example uses synthetic fixture companies.
+Live SEC ingestion is available through `smct ingest-sec`; other signals still require
+their documented inputs. Live data feeds and investment performance validation are not
+implied by the software release.
+
 ## Current status
 
 The initial implementation includes:
@@ -20,6 +34,11 @@ The initial implementation includes:
 - composite research-priority scorer
 - ranked discovery workflow
 - Federal Reserve macro-regime context signal
+- Financial quality and dilution signal Q1
+- Deterministic company research reports and source-linked evidence
+- Saved research runs, versioned theses, catalysts and invalidation reviews
+- Watchlist change reports with comparability checks
+- SEC import command with period-aligned financial features
 - CLI and tests
 
 ## Run locally

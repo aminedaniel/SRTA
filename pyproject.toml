@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smct-research"
-version = "0.2.0"
+version = "0.3.0"
 description = "Systematic research platform for small- and mid-cap technology equities"
 requires-python = ">=3.11"
 dependencies = [
@@ -35,4 +35,4 @@ select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.hatch.build]
-include = ["src/smct_research/config/*.yaml"]
+include = ["src/smct_research/**/*.py", "src/smct_research/config/*.yaml"]

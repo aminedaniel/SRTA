@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 from pydantic import BaseModel, Field
 
 from smct_research.core.models import SignalDirection, SignalResult
@@ -16,16 +18,23 @@ class ResearchScore(BaseModel):
 
 class CompositeResearchScorer:
     def __init__(self, weights: dict[str, float] | None = None) -> None:
-        self.weights = weights or {
-            "A1": 1.25,
-            "A2": 1.10,
-            "A3": 1.00,
-            "B1": 0.85,
-            "F1": 0.75,
-            "E2": 0.90,
-            "E3": 0.85,
-            "I1": 0.25,
-        }
+        self.weights = (
+            weights
+            if weights is not None
+            else {
+                "A1": 1.25,
+                "A2": 1.10,
+                "A3": 1.00,
+                "B1": 0.85,
+                "F1": 0.75,
+                "E2": 0.90,
+                "E3": 0.85,
+                "I1": 0.25,
+                "Q1": 1.15,
+            }
+        )
+        if any(not isfinite(value) or value < 0 for value in self.weights.values()):
+            raise ValueError("Signal weights must be finite and nonnegative")
 
     def score(self, results: list[SignalResult]) -> ResearchScore:
         if not results:
@@ -33,6 +42,8 @@ class CompositeResearchScorer:
         ticker = results[0].ticker
         if any(result.ticker != ticker for result in results):
             raise ValueError("Cannot combine signal results from multiple tickers")
+        if len({result.signal_id for result in results}) != len(results):
+            raise ValueError("Cannot combine duplicate signal IDs")
 
         weighted_sum = 0.0
         weight_total = 0.0
@@ -52,7 +63,9 @@ class CompositeResearchScorer:
             elif result.direction == SignalDirection.NEGATIVE:
                 negatives.append(result.signal_id)
 
-        normalized = weighted_sum / weight_total if weight_total else 0.0
+        if weight_total == 0:
+            raise ValueError("No signal has positive confidence and weight")
+        normalized = weighted_sum / weight_total
         research_score = max(0.0, min(100.0, 50 + normalized / 2))
         return ResearchScore(
             ticker=ticker,

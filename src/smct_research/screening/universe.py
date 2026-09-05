@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from smct_research.core.models import Company
 
 
 class UniversePolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     minimum_market_cap_usd: float = Field(default=300_000_000, gt=0)
     maximum_market_cap_usd: float = Field(default=20_000_000_000, gt=0)
     minimum_daily_dollar_volume: float = Field(default=2_000_000, ge=0)
@@ -34,6 +35,23 @@ class UniversePolicy(BaseModel):
             "ordinary_shares": "common_equity",
         }
     )
+
+    @field_serializer(
+        "countries", "technology_keywords", "allowed_exchanges", "eligible_security_types"
+    )
+    def sorted_sets(self, value: set[str]) -> list[str]:
+        return sorted(value)
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> UniversePolicy:
+        if self.maximum_market_cap_usd < self.minimum_market_cap_usd:
+            raise ValueError("Maximum market cap must be at least the minimum")
+        self.countries = {value.strip().upper() for value in self.countries}
+        self.allowed_exchanges = {value.strip().upper() for value in self.allowed_exchanges}
+        self.technology_keywords = {value.strip().lower() for value in self.technology_keywords}
+        if "" in self.technology_keywords:
+            raise ValueError("Technology keywords must not be blank")
+        return self
 
     def exclusion_reasons(self, company: Company) -> list[str]:
         """Return every reason a company cannot enter the screened universe."""

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 class ReportingPeriodType(StrEnum):
     QUARTERLY = "quarterly"
     ANNUAL = "annual"
+    YEAR_TO_DATE = "year_to_date"
 
 
 class FilingMetadata(BaseModel):
@@ -66,3 +67,5 @@ class FeatureValue(BaseModel):
     available_on: date
     quality_score: float = Field(ge=0, le=1)
     source_accessions: list[str] = Field(default_factory=list)
+    period_start: date | None = None
+    period_end: date | None = None

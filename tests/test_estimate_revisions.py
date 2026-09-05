@@ -407,6 +407,7 @@ def test_offline_provider_formats_and_duplicate_validation(tmp_path: Path) -> No
 
 def test_duckdb_persistence_round_trip_and_conflicts(tmp_path: Path) -> None:
     store = LocalAnalyticalStore(tmp_path / "local.duckdb")
+    store.connection.execute("SET TimeZone='America/Los_Angeles'")
     item = estimate("r1", "2026-04-01T00:00:00Z", 1.2, horizon_label="FY1", estimate_breadth=0.72)
     other_provider = item.model_copy(update={"provider": "p2"})
     store.store_estimate_snapshots([item, item, other_provider])

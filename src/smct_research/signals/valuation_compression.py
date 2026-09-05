@@ -20,6 +20,8 @@ class ValuationCompressionSignal(ResearchSignal):
         median_multiple = snapshot.require_float("ev_sales_3y_median")
         current_growth = snapshot.require_float("revenue_growth_current")
         median_growth = snapshot.require_float("revenue_growth_3y_median")
+        if current_multiple < 0 or median_multiple <= 0:
+            raise ValueError("EV/Sales must be nonnegative with a positive historical median")
 
         multiple_compression = 1 - (current_multiple / median_multiple)
         growth_deceleration = max(0.0, median_growth - current_growth)
@@ -28,15 +30,24 @@ class ValuationCompressionSignal(ResearchSignal):
         confidence = min(0.95, 0.45 + abs(disconnect))
 
         evidence = [
-            f"EV/Sales is {multiple_compression:.0%} below its three-year median.",
-            f"Revenue growth is {growth_deceleration:.0%} below its three-year median.",
+            f"EV/Sales is {abs(multiple_compression):.0%} "
+            f"{'below' if multiple_compression >= 0 else 'above'} its three-year median.",
+            f"Revenue growth is {growth_deceleration * 100:.1f} percentage points below its three-year median.",
         ]
         thesis = (
             "Valuation compression appears greater than the deterioration in revenue growth."
             if score > 20
+            else "Valuation is demanding relative to changes in revenue growth."
+            if score < -20
             else "Valuation and growth deterioration are not meaningfully disconnected."
         )
-        direction = SignalDirection.POSITIVE if score > 20 else SignalDirection.NEUTRAL
+        direction = (
+            SignalDirection.POSITIVE
+            if score > 20
+            else SignalDirection.NEGATIVE
+            if score < -20
+            else SignalDirection.NEUTRAL
+        )
 
         return SignalResult(
             signal_id=self.id,
