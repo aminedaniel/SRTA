@@ -25,9 +25,11 @@ from smct_research.providers.estimates import OfflineEstimateProvider
 from smct_research.research.commands import register_workflow_commands
 from smct_research.scoring.composite import CompositeResearchScorer
 from smct_research.screening.configuration import load_settings
+from smct_research.screening.enrichment import enrich
 from smct_research.screening.io import load_feature_snapshots, load_universe, write_csv, write_json
 from smct_research.screening.registry import default_registry
 from smct_research.screening.service import BatchEvaluationService
+from smct_research.validation import validate_history, write_validation
 from smct_research.valuation.reverse_dcf import (
     DCFScenario,
     ReverseDCFInputs,
@@ -37,6 +39,70 @@ from smct_research.valuation.reverse_dcf import (
 )
 
 app = typer.Typer(no_args_is_help=True)
+
+
+@app.command("enrich")
+def enrich_features(
+    input_dir: Path,
+    output_dir: Path,
+    as_of: str = typer.Option(...),
+    prices: Path | None = typer.Option(None),  # noqa: B008
+    multiples: Path | None = typer.Option(None),  # noqa: B008
+    evidence: Path | None = typer.Option(None),  # noqa: B008
+) -> None:
+    """Add dated market and research exports to SEC feature snapshots."""
+    try:
+        timestamp = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        if timestamp > datetime.now(UTC):
+            raise ValueError("Cannot enrich with a future as-of")
+        if input_dir.resolve() == output_dir.resolve():
+            raise ValueError("Use a separate output directory to preserve the source snapshots")
+        snapshots = enrich(
+            load_feature_snapshots(input_dir),
+            timestamp,
+            prices=prices,
+            multiples=multiples,
+            evidence=evidence,
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for ticker, snapshot in snapshots.items():
+            (output_dir / f"{ticker}.json").write_text(snapshot.model_dump_json(indent=2) + "\n")
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Enriched {len(snapshots)} snapshots in {output_dir}")
+
+
+@app.command("validate-history")
+def validate_history_command(
+    universes: Path,
+    snapshots: Path,
+    prices: Path,
+    output_json: Path = typer.Option(Path("validation-output/results.json")),  # noqa: B008
+    benchmark: str = typer.Option("VOO"),
+    min_coverage: float = typer.Option(50, min=0, max=100),
+    round_trip_cost: float = typer.Option(0.005, min=0, max=0.99),
+) -> None:
+    """Evaluate dated cohorts at 12, 24 and 36 months against a benchmark."""
+    try:
+        result = validate_history(
+            universes,
+            snapshots,
+            prices,
+            benchmark=benchmark,
+            coverage=min_coverage,
+            round_trip_cost=round_trip_cost,
+        )
+        write_validation(output_json, result)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise typer.BadParameter(str(error)) from error
+    for horizon, item in result["summary"].items():
+        typer.echo(
+            f"{horizon} months: {item['complete_cohorts']} complete cohorts; "
+            f"alpha established: {item['alpha_established']}"
+        )
+    typer.echo(f"Saved {output_json}")
 
 
 @app.command()
@@ -64,7 +130,7 @@ def screen(
     as_of: str | None = typer.Option(None),  # noqa: B008
     top: int | None = typer.Option(None, min=1),  # noqa: B008,
     min_score: float | None = typer.Option(None, min=0, max=100),  # noqa: B008
-    min_coverage: float = typer.Option(0, min=0, max=100),
+    min_coverage: float = typer.Option(50, min=0, max=100),
     output_json: Path | None = typer.Option(None),  # noqa: B008
     output_csv: Path | None = typer.Option(None),  # noqa: B008
     include_ineligible: bool = typer.Option(False),
