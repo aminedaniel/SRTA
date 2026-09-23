@@ -6,6 +6,8 @@ A systematic research platform for discovering underfollowed and potentially mis
 
 The local screening, report, thesis and monitoring workflow is ready in **v0.3**.
 See [QUICKSTART](docs/QUICKSTART.md) for installation, SEC imports and the complete workflow.
+See [DATA_AND_VALIDATION](docs/DATA_AND_VALIDATION.md) for dated evidence exports,
+coverage gates and the forward-return evaluation.
 
 ```bash
 smct research examples/screening/universe.json examples/screening/features --as-of 2026-07-17T00:00:00Z

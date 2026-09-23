@@ -175,6 +175,8 @@ def test_offline_sec_to_ranked_research_end_to_end(tmp_path):
             str(tmp_path / "report"),
             "--db",
             str(tmp_path / "r.sqlite3"),
+            "--min-coverage",
+            "0",  # sparse SEC fixture exercises the import path
         ],
     )
     assert result.exit_code == 0, result.output

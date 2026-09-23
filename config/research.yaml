@@ -15,6 +15,10 @@ signal_weights:
   E3: 0.85
   M1: 1.00
   I1: 0.25
+  V1: 0.80
+  T1: 0.30
+  T2: 0.50
+  T3: 0.00
 
 research:
   default_horizon_months: 30

@@ -224,6 +224,8 @@ def test_cli_screen_to_report_to_thesis_to_changes(tmp_path):
         str(output),
         "--top",
         "1",
+        "--min-coverage",
+        "0",  # deliberately sparse synthetic sample
     ]
     first = runner.invoke(app, [*args, "--as-of", STAMP.isoformat()])
     assert first.exit_code == 0, first.output

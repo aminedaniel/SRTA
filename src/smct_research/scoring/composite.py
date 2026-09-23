@@ -31,6 +31,10 @@ class CompositeResearchScorer:
                 "E3": 0.85,
                 "I1": 0.25,
                 "Q1": 1.15,
+                "V1": 0.8,
+                "T1": 0.3,
+                "T2": 0.5,
+                "T3": 0.0,
             }
         )
         if any(not isfinite(value) or value < 0 for value in self.weights.values()):

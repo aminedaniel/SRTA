@@ -73,7 +73,11 @@ class BatchEvaluationService:
                         result.evaluated_at = evaluated_at
                         results.append(result)
                 unavailable = [s.id for s in signals if s.id not in {r.signal_id for r in results}]
-            completeness = (100 * len(results) / len(signals)) if signals else 100.0
+            scored = [signal for signal in signals if self.scorer.weights.get(signal.id, 1) > 0]
+            evaluated = {result.signal_id for result in results}
+            completeness = (
+                (100 * sum(s.id in evaluated for s in scored) / len(scored)) if scored else 100.0
+            )
             score = None
             if results:
                 try:

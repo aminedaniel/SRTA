@@ -45,7 +45,7 @@ def research(
     as_of: str | None = typer.Option(None),
     top: int | None = typer.Option(None, min=1),  # noqa: B008
     min_score: float = typer.Option(0, min=0, max=100),
-    min_coverage: float = typer.Option(0, min=0, max=100),
+    min_coverage: float = typer.Option(50, min=0, max=100),
     include_ineligible: bool = typer.Option(False),
     config: Path | None = typer.Option(None),  # noqa: B008
 ) -> None:
